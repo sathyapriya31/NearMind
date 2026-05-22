@@ -1,7 +1,7 @@
 import { GEMINI_API_KEY } from '../utils/config';
 
 const GEMINI_URL =
-  'https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent';
+  'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent';
 
 /**
  * buildPrompt
@@ -53,7 +53,8 @@ export async function getAIRecommendation(
     contents: [{ parts: [{ text: prompt }] }],
     generationConfig: {
       temperature: 0.7,
-      maxOutputTokens: 200,
+      maxOutputTokens: 512,
+      thinkingConfig: { thinkingBudget: 0 },
     },
   };
 
@@ -66,10 +67,13 @@ export async function getAIRecommendation(
   if (!response.ok) {
     throw new Error(`Gemini API error: ${response.status}`);
   }
-
+  console.log(response);
   const data = await response.json();
+  console.log(data);
+  const parts = data?.candidates?.[0]?.content?.parts ?? [];
+  const responsePart = parts.find(p => !p.thought) ?? parts[0];
   const text =
-    data?.candidates?.[0]?.content?.parts?.[0]?.text ||
+    responsePart?.text ||
     'Sorry, I could not generate a recommendation right now.';
 
   return text.trim();

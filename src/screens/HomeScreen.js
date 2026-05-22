@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useCallback } from 'react';
 import {
   View,
   Text,
@@ -6,39 +6,22 @@ import {
   StyleSheet,
   SafeAreaView,
   ActivityIndicator,
-
 } from 'react-native';
+import { useFocusEffect } from '@react-navigation/native';
 import useLocation from '../hooks/useLocation';
 import { CATEGORIES } from '../utils/categories';
 import { colors, typography, spacing, radius } from '../styles/theme';
 
 export default function HomeScreen({ navigation }) {
-  const { coords, loading, error, fetchLocation } = useLocation();
+  const { loading, error, fetchLocation } = useLocation();
 
-  // Step 1: User taps a category button
-  // Step 2: GPS fires FIRST — only after coords are ready, navigate
-  const handleCategoryPress = async category => {
-    try {
-      // Trigger GPS
-      await new Promise((resolve, reject) => {
-        fetchLocation();
-        // Poll until coords or error are set (simple approach)
-        const interval = setInterval(() => {
-          if (coords) {
-            clearInterval(interval);
-            resolve(coords);
-          }
-        }, 300);
-        setTimeout(() => {
-          clearInterval(interval);
-          reject(new Error('Location timeout'));
-        }, 15000);
-      });
-    } catch {
-      // If coords already cached, use them
-    }
+  useFocusEffect(
+    useCallback(() => {
+      fetchLocation();
+    }, [fetchLocation]),
+  );
 
-    // Navigate — PlacesScreen will also call fetchLocation on mount
+  const handleCategoryPress = category => {
     navigation.navigate('Places', { category });
   };
 

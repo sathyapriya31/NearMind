@@ -36,6 +36,7 @@ export default function RecommendationScreen({ route, navigation }) {
         userLat,
         userLng,
       );
+      console.log('AI text:', text);
       setAiText(text);
     } catch (err) {
       console.error('AI error:', err);
@@ -55,8 +56,8 @@ export default function RecommendationScreen({ route, navigation }) {
       <ScrollView
         style={styles.scroll}
         contentContainerStyle={styles.container}
-        showsVerticalScrollIndicator={false}>
-
+        showsVerticalScrollIndicator={false}
+      >
         {/* ── Header ── */}
         <View style={styles.header}>
           <BackButton onPress={() => navigation.goBack()} />
@@ -66,7 +67,7 @@ export default function RecommendationScreen({ route, navigation }) {
         {/* ── AI Bubble ── */}
         <View style={styles.aiBubble}>
           <View style={styles.aiBadge}>
-            <Text style={styles.aiBadgeText}>✦  NearMind AI</Text>
+            <Text style={styles.aiBadgeText}>✦ NearMind AI</Text>
           </View>
 
           {loading ? (
@@ -81,7 +82,8 @@ export default function RecommendationScreen({ route, navigation }) {
               <Text style={styles.aiErrorText}>{error}</Text>
               <TouchableOpacity
                 style={styles.retryBtn}
-                onPress={loadAIRecommendation}>
+                onPress={loadAIRecommendation}
+              >
                 <Text style={styles.retryText}>Try again</Text>
               </TouchableOpacity>
             </View>
@@ -105,7 +107,6 @@ export default function RecommendationScreen({ route, navigation }) {
             />
           </View>
         ))}
-
       </ScrollView>
     </SafeAreaView>
   );
