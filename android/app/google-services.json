@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "740446204684",
+    "project_id": "nearmind-96e3f",
+    "storage_bucket": "nearmind-96e3f.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:740446204684:android:96537c18f1abb928e44f29",
+        "android_client_info": {
+          "package_name": "com.nearmind"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCpDfXysMy0OVVE--Dx2K8xnECOCkkk5cg"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
