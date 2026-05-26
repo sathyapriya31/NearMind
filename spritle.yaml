@@ -65,7 +65,7 @@ workflows:
         script: |
           cd "$CM_BUILD_DIR/ios"
           echo "🛠️ Programmatically enabling Automatic Code Signing in Xcode project..."
-          fastlane run enable_automatic_code_signing path:"NearMind.xcodeproj"
+          fastlane run automatic_code_signing path:"NearMind.xcodeproj" use_automatic_signing:true
       - name: Build iOS Application IPA
         script: |
           cd "$CM_BUILD_DIR/ios"
