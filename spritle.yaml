@@ -47,10 +47,12 @@ workflows:
       - name: Build iOS Application IPA
         script: |
           cd "$CM_BUILD_DIR"
-          # Execute local compilation commands
-          xcode-project build-ipa \
-            --workspace "$CM_BUILD_DIR/ios/$XCODE_WORKSPACE" \
-            --scheme "$XCODE_SCHEME"
+          # Compile and package iOS IPA using Fastlane Gym
+          bundle exec fastlane gym \
+            workspace:"ios/$XCODE_WORKSPACE" \
+            scheme:"$XCODE_SCHEME" \
+            output_directory:"build/ios/ipa" \
+            output_name:"NearMind.ipa"
       - name: Distribute to Firebase App Distribution
         script: |
           bundle exec fastlane run firebase_app_distribution \
