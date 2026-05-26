@@ -19,7 +19,7 @@ workflows:
           ./gradlew clean assembleRelease -PversionCode=$BUILD_NUMBER -PversionName=$VERSION_NAME
       - name: Distribute to Firebase App Distribution
         script: |
-          bundle exec fastlane run firebase_app_distribution \
+          fastlane run firebase_app_distribution \
             app:"$FIREBASE_APP_ID_ANDROID" \
             apk_path:"app/build/outputs/apk/release/app-release.apk" \
             firebase_cli_token:"$FIREBASE_CLI_TOKEN"
@@ -48,14 +48,14 @@ workflows:
         script: |
           cd "$CM_BUILD_DIR"
           # Compile and package iOS IPA using Fastlane Gym
-          bundle exec fastlane gym \
+          fastlane gym \
             workspace:"ios/$XCODE_WORKSPACE" \
             scheme:"$XCODE_SCHEME" \
             output_directory:"build/ios/ipa" \
             output_name:"NearMind.ipa"
       - name: Distribute to Firebase App Distribution
         script: |
-          bundle exec fastlane run firebase_app_distribution \
+          fastlane run firebase_app_distribution \
             app:"$FIREBASE_APP_ID_IOS" \
             ipa_path:"build/ios/ipa/NearMind.ipa" \
             firebase_cli_token:"$FIREBASE_CLI_TOKEN"
