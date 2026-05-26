@@ -1,0 +1,63 @@
+workflows:
+  # --- Android Custom Workflow ---
+  native-android:
+    name: Native Android Custom Workflow
+    max_build_duration: 120
+    instance_type: mac_mini_m2
+    environment:
+      vars:
+        PACKAGE_NAME: "com.nearmind"
+        FIREBASE_APP_ID_ANDROID: "1:740446204684:android:96537c18f1abb928e44f29" # <-- Replace with your Android Firebase App ID
+    scripts:
+      - name: Set Android SDK location
+        script: |
+          echo "sdk.dir=$ANDROID_SDK_ROOT" > "$CM_BUILD_DIR/local.properties"
+      - name: Build Android Release APK/AAB
+        script: |
+          cd "$CM_BUILD_DIR"
+          # Run clean and assemble release
+          ./gradlew clean assembleRelease -PversionCode=$BUILD_NUMBER -PversionName=$VERSION_NAME
+      - name: Distribute to Firebase App Distribution
+        script: |
+          bundle exec fastlane run firebase_app_distribution \
+            app:"$FIREBASE_APP_ID_ANDROID" \
+            apk_path:"app/build/outputs/apk/release/app-release.apk" \
+            firebase_cli_token:"$FIREBASE_CLI_TOKEN"
+    artifacts:
+      # Wildcard patterns to find and upload compiled Android builds
+      - app/build/outputs/apk/release/*.apk
+      - app/build/outputs/bundle/release/*.aab
+
+  # --- iOS Custom Workflow ---
+  ios-native-workflow:
+    name: iOS Native Custom Workflow
+    max_build_duration: 120
+    instance_type: mac_mini_m2
+    environment:
+      vars:
+        BUNDLE_ID: "com.spritle.nearmind"
+        XCODE_WORKSPACE: "NearMind.xcworkspace"
+        XCODE_SCHEME: "NearMind"  # <-- Updated scheme based on Xcode screenshot
+        FIREBASE_APP_ID_IOS: "1:740446204684:ios:c8173307d51f436ae44f29" # <-- Replace with your iOS Firebase App ID
+    scripts:
+      - name: Install CocoaPods dependencies
+        script: |
+          cd "$CM_BUILD_DIR/ios"
+          pod install
+      - name: Build iOS Application IPA
+        script: |
+          cd "$CM_BUILD_DIR"
+          # Execute local compilation commands
+          xcode-project build-ipa \
+            --workspace "$CM_BUILD_DIR/ios/$XCODE_WORKSPACE" \
+            --scheme "$XCODE_SCHEME"
+      - name: Distribute to Firebase App Distribution
+        script: |
+          bundle exec fastlane run firebase_app_distribution \
+            app:"$FIREBASE_APP_ID_IOS" \
+            ipa_path:"build/ios/ipa/NearMind.ipa" \
+            firebase_cli_token:"$FIREBASE_CLI_TOKEN"
+    artifacts:
+      # Wildcard patterns to locate compiled iOS artifacts
+      - build/ios/ipa/*.ipa
+      - /tmp/xcodebuild_logs/*.log
