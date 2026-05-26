@@ -61,6 +61,11 @@ workflows:
             ls -la
             exit 1
           }
+      - name: Enable Xcode Automatic Signing
+        script: |
+          cd "$CM_BUILD_DIR/ios"
+          echo "🛠️ Programmatically enabling Automatic Code Signing in Xcode project..."
+          fastlane run enable_automatic_code_signing path:"NearMind.xcodeproj"
       - name: Build iOS Application IPA
         script: |
           cd "$CM_BUILD_DIR/ios"
@@ -83,12 +88,12 @@ workflows:
             echo "$APPLE_API_KEY_CONTENT" > "$CM_BUILD_DIR/private_keys/AuthKey_${APPLE_API_KEY_ID}.p8"
             
             fastlane gym \
-              workspace:"$XCODE_WORKSPACE" \
-              scheme:"$XCODE_SCHEME" \
-              export_method:"development" \
-              xcargs:"-allowProvisioningUpdates -authenticationKeyID ${APPLE_API_KEY_ID} -authenticationKeyIssuerID ${APPLE_API_ISSUER} -authenticationKeyPath ${CM_BUILD_DIR}/private_keys/AuthKey_${APPLE_API_KEY_ID}.p8" \
-              output_directory:"$CM_BUILD_DIR/build/ios/ipa" \
-              output_name:"NearMind.ipa" || {
+              --workspace "$XCODE_WORKSPACE" \
+              --scheme "$XCODE_SCHEME" \
+              --export_method "development" \
+              --xcargs "-allowProvisioningUpdates -authenticationKeyID ${APPLE_API_KEY_ID} -authenticationKeyIssuerID ${APPLE_API_ISSUER} -authenticationKeyPath ${CM_BUILD_DIR}/private_keys/AuthKey_${APPLE_API_KEY_ID}.p8" \
+              --output_directory "$CM_BUILD_DIR/build/ios/ipa" \
+              --output_name "NearMind.ipa" || {
                 echo "----------------------------------------"
                 echo "FASTLANE GYM FAILED! Printing build log:"
                 echo "----------------------------------------"
@@ -108,12 +113,12 @@ workflows:
           else
             echo "ℹ️ No App Store Connect API Key found in environment. Falling back to local keychain automatic provisioning..."
             fastlane gym \
-              workspace:"$XCODE_WORKSPACE" \
-              scheme:"$XCODE_SCHEME" \
-              export_method:"development" \
-              xcargs:"-allowProvisioningUpdates" \
-              output_directory:"$CM_BUILD_DIR/build/ios/ipa" \
-              output_name:"NearMind.ipa" || {
+              --workspace "$XCODE_WORKSPACE" \
+              --scheme "$XCODE_SCHEME" \
+              --export_method "development" \
+              --xcargs "-allowProvisioningUpdates" \
+              --output_directory "$CM_BUILD_DIR/build/ios/ipa" \
+              --output_name "NearMind.ipa" || {
                 echo "----------------------------------------"
                 echo "FASTLANE GYM FAILED! Printing build log:"
                 echo "----------------------------------------"
