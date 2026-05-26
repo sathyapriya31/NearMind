@@ -64,23 +64,50 @@ workflows:
       - name: Build iOS Application IPA
         script: |
           cd "$CM_BUILD_DIR/ios"
-          # Compile and package iOS IPA using Fastlane Gym inside the ios folder
-          fastlane gym \
-            workspace:"$XCODE_WORKSPACE" \
-            scheme:"$XCODE_SCHEME" \
-            export_method:"development" \
-            output_directory:"$CM_BUILD_DIR/build/ios/ipa" \
-            output_name:"NearMind.ipa" || {
-              echo "----------------------------------------"
-              echo "FASTLANE GYM FAILED! Printing build log:"
-              echo "----------------------------------------"
-              if [ -f /Users/spritle/Library/Logs/gym/NearMind-NearMind.log ]; then
-                cat /Users/spritle/Library/Logs/gym/NearMind-NearMind.log | tail -n 250
-              else
-                echo "Log file /Users/spritle/Library/Logs/gym/NearMind-NearMind.log not found."
-              fi
-              exit 1
-            }
+          
+          # Write App Store Connect API Key to disk if present to authorize automatic provisioning updates on CI
+          if [ -n "$APPLE_API_KEY_CONTENT" ] && [ -n "$APPLE_API_KEY_ID" ]; then
+            echo "🔐 Using App Store Connect API Key for automated cloud signing..."
+            mkdir -p "$CM_BUILD_DIR/private_keys"
+            echo "$APPLE_API_KEY_CONTENT" > "$CM_BUILD_DIR/private_keys/AuthKey_${APPLE_API_KEY_ID}.p8"
+            
+            fastlane gym \
+              workspace:"$XCODE_WORKSPACE" \
+              scheme:"$XCODE_SCHEME" \
+              export_method:"development" \
+              xcargs:"-allowProvisioningUpdates -authenticationKeyID ${APPLE_API_KEY_ID} -authenticationKeyIssuerID ${APPLE_API_ISSUER} -authenticationKeyPath ${CM_BUILD_DIR}/private_keys/AuthKey_${APPLE_API_KEY_ID}.p8" \
+              output_directory:"$CM_BUILD_DIR/build/ios/ipa" \
+              output_name:"NearMind.ipa" || {
+                echo "----------------------------------------"
+                echo "FASTLANE GYM FAILED! Printing build log:"
+                echo "----------------------------------------"
+                if [ -f /Users/spritle/Library/Logs/gym/NearMind-NearMind.log ]; then
+                  cat /Users/spritle/Library/Logs/gym/NearMind-NearMind.log | tail -n 250
+                fi
+                rm -rf "$CM_BUILD_DIR/private_keys"
+                exit 1
+              }
+            
+            # Clean up key file
+            rm -rf "$CM_BUILD_DIR/private_keys"
+          else
+            echo "ℹ️ No App Store Connect API Key found in environment. Falling back to local keychain automatic provisioning..."
+            fastlane gym \
+              workspace:"$XCODE_WORKSPACE" \
+              scheme:"$XCODE_SCHEME" \
+              export_method:"development" \
+              xcargs:"-allowProvisioningUpdates" \
+              output_directory:"$CM_BUILD_DIR/build/ios/ipa" \
+              output_name:"NearMind.ipa" || {
+                echo "----------------------------------------"
+                echo "FASTLANE GYM FAILED! Printing build log:"
+                echo "----------------------------------------"
+                if [ -f /Users/spritle/Library/Logs/gym/NearMind-NearMind.log ]; then
+                  cat /Users/spritle/Library/Logs/gym/NearMind-NearMind.log | tail -n 250
+                fi
+                exit 1
+              }
+          fi
       - name: Distribute to Firebase App Distribution
         script: |
           fastlane run firebase_app_distribution \
