@@ -65,6 +65,17 @@ workflows:
         script: |
           cd "$CM_BUILD_DIR/ios"
           
+          # Self-Healing Asset Catalog: Recreate basic healthy Images.xcassets and Contents.json if corrupted/missing in Git
+          echo "Checking integrity of asset catalogs..."
+          mkdir -p "$CM_BUILD_DIR/ios/NearMind/Images.xcassets"
+          if [ ! -f "$CM_BUILD_DIR/ios/NearMind/Images.xcassets/Contents.json" ]; then
+            echo '{"info":{"version":1,"author":"xcode"}}' > "$CM_BUILD_DIR/ios/NearMind/Images.xcassets/Contents.json"
+          fi
+          mkdir -p "$CM_BUILD_DIR/ios/NearMind/Images.xcassets/AppIcon.appiconset"
+          if [ ! -f "$CM_BUILD_DIR/ios/NearMind/Images.xcassets/AppIcon.appiconset/Contents.json" ]; then
+            echo '{"images":[],"info":{"version":1,"author":"xcode"}}' > "$CM_BUILD_DIR/ios/NearMind/Images.xcassets/AppIcon.appiconset/Contents.json"
+          fi
+          
           # Write App Store Connect API Key to disk if present to authorize automatic provisioning updates on CI
           if [ -n "$APPLE_API_KEY_CONTENT" ] && [ -n "$APPLE_API_KEY_ID" ]; then
             echo "🔐 Using App Store Connect API Key for automated cloud signing..."
@@ -82,7 +93,11 @@ workflows:
                 echo "FASTLANE GYM FAILED! Printing build log:"
                 echo "----------------------------------------"
                 if [ -f /Users/spritle/Library/Logs/gym/NearMind-NearMind.log ]; then
-                  cat /Users/spritle/Library/Logs/gym/NearMind-NearMind.log | tail -n 250
+                  echo "=== DETAILED ERROR SEARCH ==="
+                  grep -in -E "error:|failed:" /Users/spritle/Library/Logs/gym/NearMind-NearMind.log | tail -n 100
+                  echo "=== END OF DETAILED ERROR SEARCH ==="
+                  echo "=== LAST 150 LINES OF LOG ==="
+                  cat /Users/spritle/Library/Logs/gym/NearMind-NearMind.log | tail -n 150
                 fi
                 rm -rf "$CM_BUILD_DIR/private_keys"
                 exit 1
@@ -103,7 +118,11 @@ workflows:
                 echo "FASTLANE GYM FAILED! Printing build log:"
                 echo "----------------------------------------"
                 if [ -f /Users/spritle/Library/Logs/gym/NearMind-NearMind.log ]; then
-                  cat /Users/spritle/Library/Logs/gym/NearMind-NearMind.log | tail -n 250
+                  echo "=== DETAILED ERROR SEARCH ==="
+                  grep -in -E "error:|failed:" /Users/spritle/Library/Logs/gym/NearMind-NearMind.log | tail -n 100
+                  echo "=== END OF DETAILED ERROR SEARCH ==="
+                  echo "=== LAST 150 LINES OF LOG ==="
+                  cat /Users/spritle/Library/Logs/gym/NearMind-NearMind.log | tail -n 150
                 fi
                 exit 1
               }
