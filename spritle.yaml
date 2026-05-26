@@ -52,7 +52,17 @@ workflows:
             workspace:"$XCODE_WORKSPACE" \
             scheme:"$XCODE_SCHEME" \
             output_directory:"$CM_BUILD_DIR/build/ios/ipa" \
-            output_name:"NearMind.ipa"
+            output_name:"NearMind.ipa" || {
+              echo "----------------------------------------"
+              echo "FASTLANE GYM FAILED! Printing build log:"
+              echo "----------------------------------------"
+              if [ -f /Users/spritle/Library/Logs/gym/NearMind-NearMind.log ]; then
+                cat /Users/spritle/Library/Logs/gym/NearMind-NearMind.log | tail -n 250
+              else
+                echo "Log file /Users/spritle/Library/Logs/gym/NearMind-NearMind.log not found."
+              fi
+              exit 1
+            }
       - name: Distribute to Firebase App Distribution
         script: |
           fastlane run firebase_app_distribution \
