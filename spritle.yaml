@@ -46,12 +46,12 @@ workflows:
           pod install
       - name: Build iOS Application IPA
         script: |
-          cd "$CM_BUILD_DIR"
-          # Compile and package iOS IPA using Fastlane Gym
+          cd "$CM_BUILD_DIR/ios"
+          # Compile and package iOS IPA using Fastlane Gym inside the ios folder
           fastlane gym \
-            workspace:"ios/$XCODE_WORKSPACE" \
+            workspace:"$XCODE_WORKSPACE" \
             scheme:"$XCODE_SCHEME" \
-            output_directory:"build/ios/ipa" \
+            output_directory:"$CM_BUILD_DIR/build/ios/ipa" \
             output_name:"NearMind.ipa"
       - name: Distribute to Firebase App Distribution
         script: |
