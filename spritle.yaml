@@ -68,6 +68,7 @@ workflows:
           fastlane gym \
             workspace:"$XCODE_WORKSPACE" \
             scheme:"$XCODE_SCHEME" \
+            export_method:"development" \
             output_directory:"$CM_BUILD_DIR/build/ios/ipa" \
             output_name:"NearMind.ipa" || {
               echo "----------------------------------------"
