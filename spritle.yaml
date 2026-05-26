@@ -42,8 +42,25 @@ workflows:
     scripts:
       - name: Install CocoaPods dependencies
         script: |
+          cd "$CM_BUILD_DIR"
+          echo "Checking node_modules directory..."
+          if [ ! -d "node_modules" ]; then
+            echo "node_modules not found! Installing JS dependencies..."
+            if [ -f yarn.lock ]; then
+              yarn install --frozen-lockfile || yarn install
+            else
+              npm ci || npm install
+            fi
+          fi
           cd "$CM_BUILD_DIR/ios"
-          pod install
+          echo "Installing pods..."
+          pod install || {
+            echo "----------------------------------------"
+            echo "POD INSTALL FAILED! Listing iOS directory contents:"
+            echo "----------------------------------------"
+            ls -la
+            exit 1
+          }
       - name: Build iOS Application IPA
         script: |
           cd "$CM_BUILD_DIR/ios"
