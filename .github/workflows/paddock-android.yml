@@ -1,0 +1,68 @@
+name: Paddock Android Build
+
+on:
+  workflow_dispatch:
+    inputs:
+      paddock_build_id:
+        description: "Paddock build ID"
+        required: true
+
+jobs:
+  build-android:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          java-version: ${{ secrets.JAVA_VERSION }}
+          distribution: temurin
+
+      - name: Setup Node (React Native only)
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ secrets.NODE_VERSION }}
+
+      - name: Install JS dependencies
+        run: npm install || true
+
+      - name: Decode keystore file
+        run: |
+          echo "${{ secrets.KEYSTORE_FILE }}" | base64 --decode             > android/app/paddock.keystore || echo "Keystore decode skipped or placeholder"
+
+      - name: Build APK/AAB
+        run: |
+          cd android || true
+          chmod +x gradlew || true
+          ./gradlew assembleRelease \
+            -Pandroid.injected.signing.store.file=app/paddock.keystore \
+            -Pandroid.injected.signing.store.password=${{ secrets.STORE_PASSWORD }} \
+            -Pandroid.injected.signing.key.alias=${{ secrets.KEY_ALIAS }} \
+            -Pandroid.injected.signing.key.password=${{ secrets.KEY_PASSWORD }}
+
+      - name: Upload to Firebase App Distribution
+        uses: wzieba/Firebase-Distribution-Github-Action@v1
+        with:
+          appId: ${{ secrets.FIREBASE_APP_ID }}
+          serviceCredentialsFileContent: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+          groups: ${{ secrets.FIREBASE_TESTER_GROUPS }}
+          releaseNotes: ${{ secrets.FIREBASE_RELEASE_NOTES }}
+          file: android/app/build/outputs/apk/release/app-release.apk
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-apk-${{ github.run_id }}
+          path: android/app/build/outputs/apk/release/*.apk
+
+      - name: Notify Paddock
+        if: always()
+        run: |
+          curl -X POST "${{ secrets.PADDOCK_WEBHOOK_URL }}" \
+            -H "Content-Type: application/json" \
+            -H "X-Paddock-Token: ${{ secrets.PADDOCK_WEBHOOK_TOKEN }}" \
+            -d "{\"buildId\":\"${{ github.event.inputs.paddock_build_id }}\",\"platform\":\"android\",\"runId\":\"${{ github.run_id }}\",\"status\":\"${{ job.status }}\"}"
