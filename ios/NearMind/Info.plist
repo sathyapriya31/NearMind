@@ -33,6 +33,10 @@
 		<key>NSAllowsLocalNetworking</key>
 		<true/>
 	</dict>
+	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
+	<string>This app uses your location to provide nearby services.</string>
+	<key>NSLocationAlwaysUsageDescription</key>
+	<string>This app uses your location to provide nearby services.</string>
 	<key>NSLocationWhenInUseUsageDescription</key>
 	<string>This app uses your location to provide nearby services.</string>
 	<key>RCTNewArchEnabled</key>
