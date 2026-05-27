@@ -1,143 +1,21 @@
-workflows:
-  # --- Android Custom Workflow ---
-  native-android:
-    name: Native Android Custom Workflow
-    max_build_duration: 120
-    instance_type: mac_mini_m2
-    environment:
-      vars:
-        PACKAGE_NAME: "com.nearmind"
-        FIREBASE_APP_ID_ANDROID: "1:740446204684:android:96537c18f1abb928e44f29" # <-- Replace with your Android Firebase App ID
-    scripts:
-      - name: Set Android SDK location
-        script: |
-          echo "sdk.dir=$ANDROID_SDK_ROOT" > "$CM_BUILD_DIR/local.properties"
-      - name: Build Android Release APK/AAB
-        script: |
-          cd "$CM_BUILD_DIR"
-          # Run clean and assemble release
-          ./gradlew clean assembleRelease -PversionCode=$BUILD_NUMBER -PversionName=$VERSION_NAME
-      - name: Distribute to Firebase App Distribution
-        script: |
-          fastlane run firebase_app_distribution \
-            app:"$FIREBASE_APP_ID_ANDROID" \
-            apk_path:"app/build/outputs/apk/release/app-release.apk" \
-            firebase_cli_token:"$FIREBASE_CLI_TOKEN"
-    artifacts:
-      # Wildcard patterns to find and upload compiled Android builds
-      - app/build/outputs/apk/release/*.apk
-      - app/build/outputs/bundle/release/*.aab
+# BuildPortal 🚀 Configuration File
+# Place this file in your project's root folder.
 
-  # --- iOS Custom Workflow ---
-  ios-native-workflow:
-    name: iOS Native Custom Workflow
-    max_build_duration: 120
-    instance_type: mac_mini_m2
-    environment:
-      vars:
-        BUNDLE_ID: "com.spritle.nearmind"
-        XCODE_WORKSPACE: "NearMind.xcworkspace"
-        XCODE_SCHEME: "NearMind"  # <-- Updated scheme based on Xcode screenshot
-        FIREBASE_APP_ID_IOS: "1:740446204684:ios:c8173307d51f436ae44f29" # <-- Replace with your iOS Firebase App ID
-    scripts:
-      - name: Install CocoaPods dependencies
-        script: |
-          cd "$CM_BUILD_DIR"
-          echo "Checking node_modules directory..."
-          if [ ! -d "node_modules" ]; then
-            echo "node_modules not found! Installing JS dependencies..."
-            if [ -f yarn.lock ]; then
-              yarn install --frozen-lockfile || yarn install
-            else
-              npm ci || npm install
-            fi
-          fi
-          cd "$CM_BUILD_DIR/ios"
-          echo "Installing pods..."
-          pod install || {
-            echo "----------------------------------------"
-            echo "POD INSTALL FAILED! Listing iOS directory contents:"
-            echo "----------------------------------------"
-            ls -la
-            exit 1
-          }
-      - name: Enable Xcode Automatic Signing
-        script: |
-          cd "$CM_BUILD_DIR/ios"
-          echo "🛠️ Programmatically enabling Automatic Code Signing in Xcode project..."
-          fastlane run automatic_code_signing path:"NearMind.xcodeproj" use_automatic_signing:true
-      - name: Build iOS Application IPA
-        script: |
-          cd "$CM_BUILD_DIR/ios"
-          
-          # Self-Healing Asset Catalog: Recreate basic healthy Images.xcassets and Contents.json if corrupted/missing in Git
-          echo "Checking integrity of asset catalogs..."
-          mkdir -p "$CM_BUILD_DIR/ios/NearMind/Images.xcassets"
-          if [ ! -f "$CM_BUILD_DIR/ios/NearMind/Images.xcassets/Contents.json" ]; then
-            echo '{"info":{"version":1,"author":"xcode"}}' > "$CM_BUILD_DIR/ios/NearMind/Images.xcassets/Contents.json"
-          fi
-          mkdir -p "$CM_BUILD_DIR/ios/NearMind/Images.xcassets/AppIcon.appiconset"
-          if [ ! -f "$CM_BUILD_DIR/ios/NearMind/Images.xcassets/AppIcon.appiconset/Contents.json" ]; then
-            echo '{"images":[],"info":{"version":1,"author":"xcode"}}' > "$CM_BUILD_DIR/ios/NearMind/Images.xcassets/AppIcon.appiconset/Contents.json"
-          fi
-          
-          # Write App Store Connect API Key to disk if present to authorize automatic provisioning updates on CI
-          if [ -n "$APPLE_API_KEY_CONTENT" ] && [ -n "$APPLE_API_KEY_ID" ]; then
-            echo "🔐 Using App Store Connect API Key for automated cloud signing..."
-            mkdir -p "$CM_BUILD_DIR/private_keys"
-            echo "$APPLE_API_KEY_CONTENT" > "$CM_BUILD_DIR/private_keys/AuthKey_${APPLE_API_KEY_ID}.p8"
-            
-            fastlane gym \
-              --workspace "$XCODE_WORKSPACE" \
-              --scheme "$XCODE_SCHEME" \
-              --export_method "development" \
-              --xcargs "-allowProvisioningUpdates -authenticationKeyID ${APPLE_API_KEY_ID} -authenticationKeyIssuerID ${APPLE_API_ISSUER} -authenticationKeyPath ${CM_BUILD_DIR}/private_keys/AuthKey_${APPLE_API_KEY_ID}.p8" \
-              --output_directory "$CM_BUILD_DIR/build/ios/ipa" \
-              --output_name "NearMind.ipa" || {
-                echo "----------------------------------------"
-                echo "FASTLANE GYM FAILED! Printing build log:"
-                echo "----------------------------------------"
-                if [ -f /Users/spritle/Library/Logs/gym/NearMind-NearMind.log ]; then
-                  echo "=== DETAILED ERROR SEARCH ==="
-                  grep -in -E "error:|failed:" /Users/spritle/Library/Logs/gym/NearMind-NearMind.log | tail -n 100
-                  echo "=== END OF DETAILED ERROR SEARCH ==="
-                  echo "=== LAST 150 LINES OF LOG ==="
-                  cat /Users/spritle/Library/Logs/gym/NearMind-NearMind.log | tail -n 150
-                fi
-                rm -rf "$CM_BUILD_DIR/private_keys"
-                exit 1
-              }
-            
-            # Clean up key file
-            rm -rf "$CM_BUILD_DIR/private_keys"
-          else
-            echo "ℹ️ No App Store Connect API Key found in environment. Falling back to local keychain automatic provisioning..."
-            fastlane gym \
-              --workspace "$XCODE_WORKSPACE" \
-              --scheme "$XCODE_SCHEME" \
-              --export_method "development" \
-              --output_directory "$CM_BUILD_DIR/build/ios/ipa" \
-              --output_name "NearMind.ipa" || {
-                echo "----------------------------------------"
-                echo "FASTLANE GYM FAILED! Printing build log:"
-                echo "----------------------------------------"
-                if [ -f /Users/spritle/Library/Logs/gym/NearMind-NearMind.log ]; then
-                  echo "=== DETAILED ERROR SEARCH ==="
-                  grep -in -E "error:|failed:" /Users/spritle/Library/Logs/gym/NearMind-NearMind.log | tail -n 100
-                  echo "=== END OF DETAILED ERROR SEARCH ==="
-                  echo "=== LAST 150 LINES OF LOG ==="
-                  cat /Users/spritle/Library/Logs/gym/NearMind-NearMind.log | tail -n 150
-                fi
-                exit 1
-              }
-          fi
-      - name: Distribute to Firebase App Distribution
-        script: |
-          fastlane run firebase_app_distribution \
-            app:"$FIREBASE_APP_ID_IOS" \
-            ipa_path:"build/ios/ipa/NearMind.ipa" \
-            firebase_cli_token:"$FIREBASE_CLI_TOKEN"
-    artifacts:
-      # Wildcard patterns to locate compiled iOS artifacts
-      - build/ios/ipa/*.ipa
-      - /tmp/xcodebuild_logs/*.log
+version: 1
+platform: ios
+
+xcode_cloud:
+  # (Optional) Specify the exact workflow name to run in Xcode Cloud.
+  # If left commented or blank, BuildPortal will automatically fall back
+  # to the primary default workflow configured for your product.
+  workflow_name: "Release Workflow"
+
+  # (Optional) Direct workflow ID from App Store Connect.
+  # Only use this if you want to pin this configuration to a specific workflow ID.
+  # workflow_id: "a1b2c3d4-e5f6-7a8b-9c0d-1e2f3a4b5c6d"
+
+  # (Optional) Target App Bundle Identifier to match against your Xcode target.
+  # bundle_id: "com.spritle.nearmind"
+
+  # (Optional) Automatically autolink TestFlight upon successful build.
+  testflight: true
