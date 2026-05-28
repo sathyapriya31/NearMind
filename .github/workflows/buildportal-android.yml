@@ -149,9 +149,9 @@ jobs:
           echo "artifact_path=$ARTIFACT" >> "$GITHUB_OUTPUT"
           echo "Found artifact: $ARTIFACT"
 
-      # ── 8.5. Extract package name & upload to Google Play Store (UAT only) ──
+      # ── 8.5. Extract package name & upload to Google Play Store (UAT & Production) ──
       - name: Extract Android package name
-        if: ${{ inputs.build_type == 'uat' }}
+        if: ${{ inputs.build_type != 'testing' }}
         id: pkg
         run: |
           GRADLE_FILE="android/app/build.gradle"
@@ -175,8 +175,8 @@ jobs:
           echo "Parsed Package Name: $PACKAGE_NAME"
           echo "package_name=$PACKAGE_NAME" >> "$GITHUB_OUTPUT"
 
-      - name: Upload to Google Play Store (UAT Release only)
-        if: ${{ inputs.build_type == 'uat' && secrets.BP_PLAY_SERVICE_ACCOUNT_JSON != '' }}
+      - name: Upload to Google Play Store (UAT & Production Release only)
+        if: ${{ inputs.build_type != 'testing' }}
         uses: r0adkll/upload-google-play@v1
         with:
           serviceAccountJson: ${{ secrets.BP_PLAY_SERVICE_ACCOUNT_JSON }}
