@@ -9,6 +9,7 @@
 #      - BP_AWS_SECRET_ACCESS_KEY  : Your AWS S3 secret key
 #      - BP_S3_BUCKET_NAME         : Your S3 bucket name (e.g. buildportal-artifacts)
 #      - BP_AWS_REGION             : Your S3 region (e.g. ap-south-1)
+#      - BP_PLAY_SERVICE_ACCOUNT_JSON : Your Google Play Console Service Account JSON (UAT track only)
 #
 #   The callback_url and callback_secret inputs are injected automatically
 #   by BuildPortal when it dispatches the workflow — do not set them manually.
@@ -147,6 +148,41 @@ jobs:
           fi
           echo "artifact_path=$ARTIFACT" >> "$GITHUB_OUTPUT"
           echo "Found artifact: $ARTIFACT"
+
+      # ── 8.5. Extract package name & upload to Google Play Store (UAT only) ──
+      - name: Extract Android package name
+        if: ${{ inputs.build_type == 'uat' }}
+        id: pkg
+        run: |
+          GRADLE_FILE="android/app/build.gradle"
+          if [ ! -f "$GRADLE_FILE" ]; then
+            GRADLE_FILE="app/build.gradle"
+          fi
+          
+          PACKAGE_NAME=""
+          if [ -f "$GRADLE_FILE" ]; then
+            PACKAGE_NAME=$(grep -o "applicationId\s*['\"][^'\"]*['\"]" "$GRADLE_FILE" | head -n 1 | sed -E "s/applicationId\s*['\"]([^'\"]*)['\"]/\1/")
+            if [ -z "$PACKAGE_NAME" ]; then
+              PACKAGE_NAME=$(grep -o "applicationId\s*=\s*['\"][^'\"]*['\"]" "$GRADLE_FILE" | head -n 1 | sed -E "s/applicationId\s*=\s*['\"]([^'\"]*)['\"]/\1/")
+            fi
+          fi
+          
+          if [ -z "$PACKAGE_NAME" ]; then
+            echo "applicationId not found in build.gradle. Falling back to default NearMind package."
+            PACKAGE_NAME="com.spritle.nearmind"
+          fi
+          
+          echo "Parsed Package Name: $PACKAGE_NAME"
+          echo "package_name=$PACKAGE_NAME" >> "$GITHUB_OUTPUT"
+
+      - name: Upload to Google Play Store (UAT Release only)
+        if: ${{ inputs.build_type == 'uat' && secrets.BP_PLAY_SERVICE_ACCOUNT_JSON != '' }}
+        uses: r0adkll/upload-google-play@v1
+        with:
+          serviceAccountJson: ${{ secrets.BP_PLAY_SERVICE_ACCOUNT_JSON }}
+          packageName: ${{ steps.pkg.outputs.package_name }}
+          releaseFiles: ${{ steps.locate.outputs.artifact_path }}
+          track: internal
 
       # ── 9. Upload artifact to S3 ─────────────────────────────────────────
       - name: Upload artifact to S3

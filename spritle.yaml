@@ -8,7 +8,7 @@ xcode_cloud:
   # (Optional) Specify the exact workflow name to run in Xcode Cloud.
   # If left commented or blank, BuildPortal will automatically fall back
   # to the primary default workflow configured for your product.
-  workflow_name: "Release Workflow"
+  workflow_name: "Default"
 
   # (Optional) Direct workflow ID from App Store Connect.
   # Only use this if you want to pin this configuration to a specific workflow ID.
