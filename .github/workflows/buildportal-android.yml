@@ -74,28 +74,28 @@ jobs:
         if: hashFiles('package.json') != '' && hashFiles('package-lock.json') != ''
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '22'
           cache: 'npm'
 
       - name: Set up Node.js (with yarn cache)
         if: hashFiles('package.json') != '' && hashFiles('yarn.lock') != ''
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '22'
           cache: 'yarn'
 
       - name: Set up Node.js (with pnpm cache)
         if: hashFiles('package.json') != '' && hashFiles('pnpm-lock.yaml') != ''
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '22'
           cache: 'pnpm'
 
       - name: Set up Node.js (no cache)
         if: hashFiles('package.json') != '' && hashFiles('package-lock.json') == '' && hashFiles('yarn.lock') == '' && hashFiles('pnpm-lock.yaml') == ''
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '22'
 
       # ── 4. Install JavaScript dependencies ───────────────────────────────
       - name: Install JS dependencies
@@ -106,9 +106,9 @@ jobs:
           elif [ -f pnpm-lock.yaml ]; then
             npm install -g pnpm && pnpm install --frozen-lockfile
           elif [ -f package-lock.json ]; then
-            npm ci
+            npm ci || (echo "⚠️ npm ci failed, falling back to npm install..." && npm install --legacy-peer-deps --no-audit --no-fund)
           else
-            npm install
+            npm install --legacy-peer-deps --no-audit --no-fund
           fi
 
       # ── 5. Make gradlew executable ───────────────────────────────────────
