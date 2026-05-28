@@ -1,0 +1,205 @@
+##############################################################################
+# BuildPortal — Android Build Workflow
+#
+# INSTRUCTIONS:
+#   1. Copy this file to your repository at:
+#      .github/workflows/buildportal-android.yml
+#   2. Add the following Repository Secrets in GitHub → Settings → Secrets:
+#      - BP_AWS_ACCESS_KEY_ID      : Your AWS S3 access key
+#      - BP_AWS_SECRET_ACCESS_KEY  : Your AWS S3 secret key
+#      - BP_S3_BUCKET_NAME         : Your S3 bucket name (e.g. buildportal-artifacts)
+#      - BP_AWS_REGION             : Your S3 region (e.g. ap-south-1)
+#
+#   The callback_url and callback_secret inputs are injected automatically
+#   by BuildPortal when it dispatches the workflow — do not set them manually.
+##############################################################################
+
+name: BuildPortal Android Build
+
+on:
+  workflow_dispatch:
+    inputs:
+      build_id:
+        description: 'BuildPortal internal build ID'
+        required: true
+        type: string
+      version_code:
+        description: 'Android version code (integer)'
+        required: false
+        default: '1'
+        type: string
+      version_name:
+        description: 'Android version name (e.g. 1.0.0)'
+        required: false
+        default: '1.0.0'
+        type: string
+      build_type:
+        description: 'Build type: testing | uat | production'
+        required: false
+        default: 'testing'
+        type: string
+      android_format:
+        description: 'Output format: apk | aab'
+        required: false
+        default: 'apk'
+        type: string
+      callback_url:
+        description: 'BuildPortal backend callback URL'
+        required: true
+        type: string
+      callback_secret:
+        description: 'Secret to authenticate the callback'
+        required: true
+        type: string
+
+jobs:
+  build-android:
+    name: Build Android (${{ inputs.android_format }})
+    runs-on: ubuntu-latest
+
+    steps:
+      # ── 1. Checkout ────────────────────────────────────────────────────────
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # ── 2. Set up Java (required by Gradle) ─────────────────────────────
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+
+      # ── 3. Install Node.js (for React Native / Expo projects) ────────────
+      - name: Set up Node.js
+        if: hashFiles('package.json') != ''
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      # ── 4. Install JavaScript dependencies ───────────────────────────────
+      - name: Install JS dependencies
+        if: hashFiles('package.json') != ''
+        run: |
+          if [ -f yarn.lock ]; then
+            yarn install --frozen-lockfile
+          elif [ -f pnpm-lock.yaml ]; then
+            npm install -g pnpm && pnpm install --frozen-lockfile
+          elif [ -f package-lock.json ]; then
+            npm ci
+          else
+            npm install
+          fi
+
+      # ── 5. Make gradlew executable ───────────────────────────────────────
+      - name: Make gradlew executable
+        run: |
+          if [ -f android/gradlew ]; then
+            chmod +x android/gradlew
+          elif [ -f gradlew ]; then
+            chmod +x gradlew
+          fi
+
+      # ── 6. Set version code and version name ────────────────────────────
+      - name: Set version in build.gradle
+        run: |
+          GRADLE_FILE="android/app/build.gradle"
+          if [ ! -f "$GRADLE_FILE" ]; then
+            GRADLE_FILE="app/build.gradle"
+          fi
+          if [ -f "$GRADLE_FILE" ]; then
+            sed -i "s/versionCode [0-9]*/versionCode ${{ inputs.version_code }}/" "$GRADLE_FILE"
+            sed -i "s/versionName \"[^\"]*\"/versionName \"${{ inputs.version_name }}\"/" "$GRADLE_FILE"
+            echo "Updated versionCode=${{ inputs.version_code }} versionName=${{ inputs.version_name }} in $GRADLE_FILE"
+          fi
+
+      # ── 7. Build APK or AAB ──────────────────────────────────────────────
+      - name: Build Android (${{ inputs.android_format }})
+        run: |
+          if [ -f android/gradlew ]; then
+            GRADLE="./android/gradlew"
+            GRADLE_DIR="android"
+          else
+            GRADLE="./gradlew"
+            GRADLE_DIR="."
+          fi
+
+          if [ "${{ inputs.android_format }}" = "aab" ]; then
+            echo "Running: $GRADLE bundleRelease --no-daemon"
+            (cd "$GRADLE_DIR" && ./gradlew bundleRelease --no-daemon)
+          else
+            echo "Running: $GRADLE assembleRelease --no-daemon"
+            (cd "$GRADLE_DIR" && ./gradlew assembleRelease --no-daemon)
+          fi
+
+      # ── 8. Locate the build artifact ─────────────────────────────────────
+      - name: Locate build artifact
+        id: locate
+        run: |
+          if [ "${{ inputs.android_format }}" = "aab" ]; then
+            ARTIFACT=$(find . -name "app-release.aab" 2>/dev/null | head -n 1)
+          else
+            ARTIFACT=$(find . -name "app-release.apk" 2>/dev/null | head -n 1)
+          fi
+          if [ -z "$ARTIFACT" ]; then
+            echo "ERROR: Build artifact not found!" >&2
+            exit 1
+          fi
+          echo "artifact_path=$ARTIFACT" >> "$GITHUB_OUTPUT"
+          echo "Found artifact: $ARTIFACT"
+
+      # ── 9. Upload artifact to S3 ─────────────────────────────────────────
+      - name: Upload artifact to S3
+        id: upload
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.BP_AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.BP_AWS_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: ${{ secrets.BP_AWS_REGION }}
+        run: |
+          BUCKET="${{ secrets.BP_S3_BUCKET_NAME }}"
+          BUILD_ID="${{ inputs.build_id }}"
+          FORMAT="${{ inputs.android_format }}"
+          FILE="${{ steps.locate.outputs.artifact_path }}"
+          FILENAME=$(basename "$FILE")
+          S3_KEY="builds/${BUILD_ID}/android/${FILENAME}"
+
+          echo "Uploading $FILE → s3://${BUCKET}/${S3_KEY}"
+          aws s3 cp "$FILE" "s3://${BUCKET}/${S3_KEY}"
+
+          echo "s3_key=${S3_KEY}" >> "$GITHUB_OUTPUT"
+          echo "Upload complete: s3_key=${S3_KEY}"
+
+      # ── 10. Get commit info ───────────────────────────────────────────────
+      - name: Get commit info
+        id: git
+        run: |
+          echo "sha=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
+          echo "msg=$(git log -1 --pretty=%s)" >> "$GITHUB_OUTPUT"
+
+      # ── 11. Callback to BuildPortal — SUCCESS ────────────────────────────
+      - name: Notify BuildPortal (success)
+        if: success()
+        run: |
+          curl -s -X POST "${{ inputs.callback_url }}" \
+            -H "Content-Type: application/json" \
+            -d "{
+              \"secret\": \"${{ inputs.callback_secret }}\",
+              \"buildId\": \"${{ inputs.build_id }}\",
+              \"status\": \"success\",
+              \"s3Key\": \"${{ steps.upload.outputs.s3_key }}\",
+              \"commitSha\": \"${{ steps.git.outputs.sha }}\",
+              \"commitMessage\": \"${{ steps.git.outputs.msg }}\"
+            }"
+
+      # ── 12. Callback to BuildPortal — FAILURE ────────────────────────────
+      - name: Notify BuildPortal (failure)
+        if: failure()
+        run: |
+          curl -s -X POST "${{ inputs.callback_url }}" \
+            -H "Content-Type: application/json" \
+            -d "{
+              \"secret\": \"${{ inputs.callback_secret }}\",
+              \"buildId\": \"${{ inputs.build_id }}\",
+              \"status\": \"failed\",
+              \"error\": \"GitHub Actions build failed. Check the workflow logs for details.\"
+            }"
