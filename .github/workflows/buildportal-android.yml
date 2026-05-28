@@ -70,12 +70,32 @@ jobs:
           distribution: 'temurin'
 
       # ── 3. Install Node.js (for React Native / Expo projects) ────────────
-      - name: Set up Node.js
-        if: hashFiles('package.json') != ''
+      - name: Set up Node.js (with npm cache)
+        if: hashFiles('package.json') != '' && hashFiles('package-lock.json') != ''
         uses: actions/setup-node@v4
         with:
           node-version: '20'
           cache: 'npm'
+
+      - name: Set up Node.js (with yarn cache)
+        if: hashFiles('package.json') != '' && hashFiles('yarn.lock') != ''
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'yarn'
+
+      - name: Set up Node.js (with pnpm cache)
+        if: hashFiles('package.json') != '' && hashFiles('pnpm-lock.yaml') != ''
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'pnpm'
+
+      - name: Set up Node.js (no cache)
+        if: hashFiles('package.json') != '' && hashFiles('package-lock.json') == '' && hashFiles('yarn.lock') == '' && hashFiles('pnpm-lock.yaml') == ''
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
 
       # ── 4. Install JavaScript dependencies ───────────────────────────────
       - name: Install JS dependencies
