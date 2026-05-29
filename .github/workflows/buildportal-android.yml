@@ -164,12 +164,16 @@ jobs:
       - name: Download Keystore
         if: ${{ inputs.keystore_exists == 'true' }}
         run: |
-          if [ -f android/gradlew ]; then
+          if [ -d android/app ]; then
+            TARGET_DIR="android/app"
+          elif [ -d app ]; then
+            TARGET_DIR="app"
+          elif [ -d android ]; then
             TARGET_DIR="android"
           else
             TARGET_DIR="."
           fi
-          echo "Downloading keystore from backend..."
+          echo "Downloading keystore to $TARGET_DIR from backend..."
           curl -s -o "$TARGET_DIR/${{ inputs.keystore_filename }}" "${{ inputs.callback_url }}/keystore/${{ inputs.build_id }}?secret=${{ inputs.callback_secret }}"
           
           if [ ! -f "$TARGET_DIR/${{ inputs.keystore_filename }}" ]; then
@@ -196,8 +200,17 @@ jobs:
           fi
 
           if [ "${{ inputs.keystore_exists }}" = "true" ]; then
-            KEYSTORE_PATH="$(pwd)/$GRADLE_DIR/${{ inputs.keystore_filename }}"
-            echo "Building signed ${{ inputs.android_format }} using injected credentials..."
+            if [ -f "android/app/${{ inputs.keystore_filename }}" ]; then
+              KEYSTORE_PATH="$(pwd)/android/app/${{ inputs.keystore_filename }}"
+            elif [ -f "app/${{ inputs.keystore_filename }}" ]; then
+              KEYSTORE_PATH="$(pwd)/app/${{ inputs.keystore_filename }}"
+            elif [ -f "android/${{ inputs.keystore_filename }}" ]; then
+              KEYSTORE_PATH="$(pwd)/android/${{ inputs.keystore_filename }}"
+            else
+              KEYSTORE_PATH="$(pwd)/${{ inputs.keystore_filename }}"
+            fi
+            
+            echo "Building signed ${{ inputs.android_format }} using injected credentials from $KEYSTORE_PATH..."
             if [ "${{ inputs.android_format }}" = "aab" ]; then
               (cd "$GRADLE_DIR" && ./gradlew bundleRelease --no-daemon \
                 -Pandroid.injected.signing.store.file="$KEYSTORE_PATH" \
