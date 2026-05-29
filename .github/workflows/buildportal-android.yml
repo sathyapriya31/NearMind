@@ -9,6 +9,7 @@
 #      - BP_AWS_SECRET_ACCESS_KEY  : Your AWS S3 secret key
 #      - BP_S3_BUCKET_NAME         : Your S3 bucket name (e.g. buildportal-artifacts)
 #      - BP_AWS_REGION             : Your S3 region (e.g. ap-south-1)
+#      - BP_PLAY_SERVICE_ACCOUNT_JSON : Your Google Play service account JSON key (for UAT uploads)
 #
 #   The callback_url and callback_secret inputs are injected automatically
 #   by BuildPortal when it dispatches the workflow — do not set them manually.
@@ -42,6 +43,11 @@ on:
         description: 'Output format: apk | aab'
         required: false
         default: 'apk'
+        type: string
+      release_notes:
+        description: 'Release notes for Google Play Store upload'
+        required: false
+        default: 'Initial UAT Release'
         type: string
       callback_url:
         description: 'BuildPortal backend callback URL'
@@ -200,7 +206,26 @@ jobs:
           echo "sha=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
           echo "msg=$(git log -1 --pretty=%s)" >> "$GITHUB_OUTPUT"
 
-      # ── 11. Callback to BuildPortal — SUCCESS ────────────────────────────
+      # ── 11. Write Release Notes for Google Play ──────────────────────────
+      - name: Write Release Notes
+        if: ${{ success() && inputs.build_type == 'uat' && inputs.android_format == 'aab' }}
+        run: |
+          mkdir -p whatsnew
+          echo "${{ inputs.release_notes }}" > whatsnew/whatsnew-en-US
+          echo "Wrote release notes to whatsnew/whatsnew-en-US: ${{ inputs.release_notes }}"
+
+      # ── 12. Upload to Google Play (Internal Testing Track) ───────────────
+      - name: Upload to Google Play (Internal Testing)
+        if: ${{ success() && inputs.build_type == 'uat' && inputs.android_format == 'aab' }}
+        uses: r0adkll/upload-google-play@v1
+        with:
+          serviceAccountJsonPlainText: ${{ secrets.BP_PLAY_SERVICE_ACCOUNT_JSON }}
+          packageName: ${{ secrets.ANDROID_PACKAGE_NAME }}
+          releaseFiles: ${{ steps.locate.outputs.artifact_path }}
+          track: internal
+          whatsNewDirectory: whatsnew
+
+      # ── 13. Callback to BuildPortal — SUCCESS ────────────────────────────
       - name: Notify BuildPortal (success)
         if: success()
         run: |
@@ -215,7 +240,7 @@ jobs:
               \"commitMessage\": \"${{ steps.git.outputs.msg }}\"
             }"
 
-      # ── 12. Callback to BuildPortal — FAILURE ────────────────────────────
+      # ── 14. Callback to BuildPortal — FAILURE ────────────────────────────
       - name: Notify BuildPortal (failure)
         if: failure()
         run: |
