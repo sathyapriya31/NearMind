@@ -214,18 +214,43 @@ jobs:
           echo "${{ inputs.release_notes }}" > whatsnew/whatsnew-en-US
           echo "Wrote release notes to whatsnew/whatsnew-en-US: ${{ inputs.release_notes }}"
 
-      # ── 12. Upload to Google Play (Internal Testing Track) ───────────────
+      # ── 12. Extract Package Name ─────────────────────────────────────────
+      - name: Extract Package Name
+        if: ${{ success() && inputs.build_type == 'uat' && inputs.android_format == 'aab' }}
+        id: package_info
+        run: |
+          GRADLE_FILE="android/app/build.gradle"
+          if [ ! -f "$GRADLE_FILE" ]; then
+            GRADLE_FILE="app/build.gradle"
+          fi
+          if [ -f "$GRADLE_FILE" ]; then
+            PACKAGE_NAME=$(grep -o "applicationId\s*['\"][^'\"]*['\"]" "$GRADLE_FILE" | head -n 1 | sed -E "s/applicationId\s*['\"]([^'\"]*)['\"]/\1/")
+            if [ -z "$PACKAGE_NAME" ]; then
+              PACKAGE_NAME=$(grep -o "applicationId\s*=\s*['\"][^'\"]*['\"]" "$GRADLE_FILE" | head -n 1 | sed -E "s/applicationId\s*=\s*['\"]([^'\"]*)['\"]/\1/")
+            fi
+          fi
+          if [ -z "$PACKAGE_NAME" ]; then
+            PACKAGE_NAME="${{ secrets.ANDROID_PACKAGE_NAME }}"
+          fi
+          if [ -z "$PACKAGE_NAME" ]; then
+            echo "ERROR: Could not auto-detect packageName from build.gradle and ANDROID_PACKAGE_NAME secret is not set!" >&2
+            exit 1
+          fi
+          echo "package_name=$PACKAGE_NAME" >> "$GITHUB_OUTPUT"
+          echo "Detected Package Name: $PACKAGE_NAME"
+
+      # ── 13. Upload to Google Play (Internal Testing Track) ───────────────
       - name: Upload to Google Play (Internal Testing)
         if: ${{ success() && inputs.build_type == 'uat' && inputs.android_format == 'aab' }}
         uses: r0adkll/upload-google-play@v1
         with:
           serviceAccountJsonPlainText: ${{ secrets.BP_PLAY_SERVICE_ACCOUNT_JSON }}
-          packageName: ${{ secrets.ANDROID_PACKAGE_NAME }}
+          packageName: ${{ steps.package_info.outputs.package_name }}
           releaseFiles: ${{ steps.locate.outputs.artifact_path }}
           track: internal
           whatsNewDirectory: whatsnew
 
-      # ── 13. Callback to BuildPortal — SUCCESS ────────────────────────────
+      # ── 14. Callback to BuildPortal — SUCCESS ────────────────────────────
       - name: Notify BuildPortal (success)
         if: success()
         run: |
@@ -240,7 +265,7 @@ jobs:
               \"commitMessage\": \"${{ steps.git.outputs.msg }}\"
             }"
 
-      # ── 14. Callback to BuildPortal — FAILURE ────────────────────────────
+      # ── 15. Callback to BuildPortal — FAILURE ────────────────────────────
       - name: Notify BuildPortal (failure)
         if: failure()
         run: |
