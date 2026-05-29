@@ -57,6 +57,27 @@ on:
         description: 'Secret to authenticate the callback'
         required: true
         type: string
+      keystore_exists:
+        description: 'Whether a keystore is configured'
+        required: false
+        default: 'false'
+        type: string
+      keystore_filename:
+        description: 'Keystore filename'
+        required: false
+        type: string
+      keystore_alias:
+        description: 'Keystore alias'
+        required: false
+        type: string
+      keystore_password:
+        description: 'Keystore password'
+        required: false
+        type: string
+      keystore_key_password:
+        description: 'Key password'
+        required: false
+        type: string
 
 jobs:
   build-android:
@@ -139,6 +160,30 @@ jobs:
             echo "Updated versionCode=${{ inputs.version_code }} versionName=${{ inputs.version_name }} in $GRADLE_FILE"
           fi
 
+      # ── 6.5 Download Android Keystore file securely ─────────────────────
+      - name: Download Keystore
+        if: ${{ inputs.keystore_exists == 'true' }}
+        run: |
+          if [ -f android/gradlew ]; then
+            TARGET_DIR="android"
+          else
+            TARGET_DIR="."
+          fi
+          echo "Downloading keystore from backend..."
+          curl -s -o "$TARGET_DIR/${{ inputs.keystore_filename }}" "${{ inputs.callback_url }}/keystore/${{ inputs.build_id }}?secret=${{ inputs.callback_secret }}"
+          
+          if [ ! -f "$TARGET_DIR/${{ inputs.keystore_filename }}" ]; then
+            echo "ERROR: Failed to download keystore file!" >&2
+            exit 1
+          fi
+          
+          FILE_SIZE=$(wc -c < "$TARGET_DIR/${{ inputs.keystore_filename }}")
+          if [ "$FILE_SIZE" -le 0 ]; then
+            echo "ERROR: Downloaded keystore is empty!" >&2
+            exit 1
+          fi
+          echo "Keystore downloaded successfully: $TARGET_DIR/${{ inputs.keystore_filename }} ($FILE_SIZE bytes)."
+
       # ── 7. Build APK or AAB ──────────────────────────────────────────────
       - name: Build Android (${{ inputs.android_format }})
         run: |
@@ -150,12 +195,29 @@ jobs:
             GRADLE_DIR="."
           fi
 
-          if [ "${{ inputs.android_format }}" = "aab" ]; then
-            echo "Running: $GRADLE bundleRelease --no-daemon"
-            (cd "$GRADLE_DIR" && ./gradlew bundleRelease --no-daemon)
+          if [ "${{ inputs.keystore_exists }}" = "true" ]; then
+            KEYSTORE_PATH="$(pwd)/$GRADLE_DIR/${{ inputs.keystore_filename }}"
+            echo "Building signed ${{ inputs.android_format }} using injected credentials..."
+            if [ "${{ inputs.android_format }}" = "aab" ]; then
+              (cd "$GRADLE_DIR" && ./gradlew bundleRelease --no-daemon \
+                -Pandroid.injected.signing.store.file="$KEYSTORE_PATH" \
+                -Pandroid.injected.signing.store.password="${{ inputs.keystore_password }}" \
+                -Pandroid.injected.signing.key.alias="${{ inputs.keystore_alias }}" \
+                -Pandroid.injected.signing.key.password="${{ inputs.keystore_key_password }}")
+            else
+              (cd "$GRADLE_DIR" && ./gradlew assembleRelease --no-daemon \
+                -Pandroid.injected.signing.store.file="$KEYSTORE_PATH" \
+                -Pandroid.injected.signing.store.password="${{ inputs.keystore_password }}" \
+                -Pandroid.injected.signing.key.alias="${{ inputs.keystore_alias }}" \
+                -Pandroid.injected.signing.key.password="${{ inputs.keystore_key_password }}")
+            fi
           else
-            echo "Running: $GRADLE assembleRelease --no-daemon"
-            (cd "$GRADLE_DIR" && ./gradlew assembleRelease --no-daemon)
+            echo "Building unsigned ${{ inputs.android_format }}..."
+            if [ "${{ inputs.android_format }}" = "aab" ]; then
+              (cd "$GRADLE_DIR" && ./gradlew bundleRelease --no-daemon)
+            else
+              (cd "$GRADLE_DIR" && ./gradlew assembleRelease --no-daemon)
+            fi
           fi
 
       # ── 8. Locate the build artifact ─────────────────────────────────────
