@@ -115,6 +115,7 @@ jobs:
 
       # ── 7. Build APK or AAB ──────────────────────────────────────────────
       - name: Build Android (${{ inputs.android_format }})
+        id: compile
         run: |
           if [ -f android/gradlew ]; then
             GRADLE="./android/gradlew"
@@ -176,6 +177,7 @@ jobs:
 
       - name: Upload to Google Play Store (UAT & Production Release only)
         if: ${{ inputs.build_type != 'testing' }}
+        id: play
         uses: r0adkll/upload-google-play@v1
         with:
           serviceAccountJsonPlainText: ${{ secrets.BP_PLAY_SERVICE_ACCOUNT_JSON }}
@@ -235,11 +237,26 @@ jobs:
       - name: Notify BuildPortal (failure)
         if: failure()
         run: |
+          ERROR_MSG="GitHub Actions build failed. Check the workflow logs for details."
+          if [ "${{ steps.compile.outcome }}" = "failure" ]; then
+            ERROR_MSG="Gradle compilation failed. Please verify your Android gradle configuration, dependencies, and code."
+          elif [ "${{ steps.locate.outcome }}" = "failure" ]; then
+            ERROR_MSG="Locating compiled build artifact failed. The output binary could not be found."
+          elif [ "${{ steps.pkg.outcome }}" = "failure" ]; then
+            ERROR_MSG="Extracting package name from build.gradle failed. Ensure applicationId is configured correctly."
+          elif [ "${{ steps.play.outcome }}" = "failure" ]; then
+            ERROR_MSG="Google Play Store upload failed. Reason: Google Play does not accept APK format for new apps (use AAB) or service account permissions/JSON is invalid."
+          elif [ "${{ steps.upload.outcome }}" = "failure" ]; then
+            ERROR_MSG="Uploading artifact to BuildPortal failed. Verify backend S3 configurations."
+          fi
+
+          ESCAPED_ERROR=$(echo "$ERROR_MSG" | sed 's/"/\\"/g')
+
           curl -s -X POST "${{ inputs.callback_url }}" \
             -H "Content-Type: application/json" \
             -d "{
               \"secret\": \"${{ inputs.callback_secret }}\",
               \"buildId\": \"${{ inputs.build_id }}\",
               \"status\": \"failed\",
-              \"error\": \"GitHub Actions build failed. Check the workflow logs for details.\"
+              \"error\": \"$ESCAPED_ERROR\"
             }"
