@@ -52,6 +52,32 @@ on:
         description: 'Secret to authenticate the callback'
         required: true
         type: string
+      keystore_exists:
+        description: 'Whether keystore configuration exists'
+        required: false
+        default: 'false'
+        type: string
+      keystore_url:
+        description: 'Secure presigned URL to download keystore JKS file'
+        required: false
+        type: string
+      keystore_filename:
+        description: 'Original keystore filename'
+        required: false
+        default: 'release.keystore'
+        type: string
+      keystore_password:
+        description: 'Keystore password'
+        required: false
+        type: string
+      keystore_alias:
+        description: 'Key alias'
+        required: false
+        type: string
+      keystore_key_password:
+        description: 'Key password'
+        required: false
+        type: string
 
 jobs:
   build-android:
@@ -113,6 +139,14 @@ jobs:
             echo "Updated versionCode=${{ inputs.version_code }} versionName=${{ inputs.version_name }} in $GRADLE_FILE"
           fi
 
+      # ── 6.5. Download Signing Keystore ──────────────────────────────────
+      - name: Download Keystore from S3
+        if: ${{ inputs.keystore_exists == 'true' }}
+        run: |
+          mkdir -p android/app
+          curl -s -L -o "android/app/${{ inputs.keystore_filename }}" "${{ inputs.keystore_url }}"
+          echo "Downloaded keystore file and saved to android/app/${{ inputs.keystore_filename }}"
+
       # ── 7. Build APK or AAB ──────────────────────────────────────────────
       - name: Build Android (${{ inputs.android_format }})
         id: compile
@@ -125,12 +159,29 @@ jobs:
             GRADLE_DIR="."
           fi
 
-          if [ "${{ inputs.android_format }}" = "aab" ]; then
-            echo "Running: $GRADLE bundleRelease --no-daemon"
-            (cd "$GRADLE_DIR" && ./gradlew bundleRelease --no-daemon)
+          if [ "${{ inputs.keystore_exists }}" = "true" ]; then
+            KEYSTORE_PATH="$(pwd)/android/app/${{ inputs.keystore_filename }}"
+            echo "Building signed ${{ inputs.android_format }} using injected credentials from $KEYSTORE_PATH..."
+            if [ "${{ inputs.android_format }}" = "aab" ]; then
+              (cd "$GRADLE_DIR" && ./gradlew bundleRelease --no-daemon \
+                -Pandroid.injected.signing.store.file="$KEYSTORE_PATH" \
+                -Pandroid.injected.signing.store.password="${{ inputs.keystore_password }}" \
+                -Pandroid.injected.signing.key.alias="${{ inputs.keystore_alias }}" \
+                -Pandroid.injected.signing.key.password="${{ inputs.keystore_key_password }}")
+            else
+              (cd "$GRADLE_DIR" && ./gradlew assembleRelease --no-daemon \
+                -Pandroid.injected.signing.store.file="$KEYSTORE_PATH" \
+                -Pandroid.injected.signing.store.password="${{ inputs.keystore_password }}" \
+                -Pandroid.injected.signing.key.alias="${{ inputs.keystore_alias }}" \
+                -Pandroid.injected.signing.key.password="${{ inputs.keystore_key_password }}")
+            fi
           else
-            echo "Running: $GRADLE assembleRelease --no-daemon"
-            (cd "$GRADLE_DIR" && ./gradlew assembleRelease --no-daemon)
+            echo "Building unsigned/debug-signed ${{ inputs.android_format }}..."
+            if [ "${{ inputs.android_format }}" = "aab" ]; then
+              (cd "$GRADLE_DIR" && ./gradlew bundleRelease --no-daemon)
+            else
+              (cd "$GRADLE_DIR" && ./gradlew assembleRelease --no-daemon)
+            fi
           fi
 
       # ── 8. Locate the build artifact ─────────────────────────────────────
