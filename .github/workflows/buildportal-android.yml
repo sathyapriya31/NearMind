@@ -183,23 +183,28 @@ jobs:
           releaseFiles: ${{ steps.locate.outputs.artifact_path }}
           track: internal
 
-      # ── 9. Upload artifact to S3 ─────────────────────────────────────────
-      - name: Upload artifact to S3
+      # ── 9. Upload artifact to BuildPortal ────────────────────────────────
+      - name: Upload artifact to BuildPortal
         id: upload
-        env:
-          AWS_ACCESS_KEY_ID: ${{ secrets.BP_AWS_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.BP_AWS_SECRET_ACCESS_KEY }}
-          AWS_DEFAULT_REGION: ${{ secrets.BP_AWS_REGION }}
         run: |
-          BUCKET="${{ secrets.BP_S3_BUCKET_NAME }}"
-          BUILD_ID="${{ inputs.build_id }}"
-          FORMAT="${{ inputs.android_format }}"
           FILE="${{ steps.locate.outputs.artifact_path }}"
           FILENAME=$(basename "$FILE")
-          S3_KEY="builds/${BUILD_ID}/android/${FILENAME}"
+          CALLBACK_URL="${{ inputs.callback_url }}"
+          UPLOAD_URL="${CALLBACK_URL%/github-actions/callback}/upload"
 
-          echo "Uploading $FILE → s3://${BUCKET}/${S3_KEY}"
-          aws s3 cp "$FILE" "s3://${BUCKET}/${S3_KEY}"
+          echo "Uploading $FILE to $UPLOAD_URL..."
+          RESPONSE=$(curl -s -S -F "file=@$FILE" \
+            -F "secret=${{ inputs.callback_secret }}" \
+            -F "buildId=${{ inputs.build_id }}" \
+            -F "platform=android" \
+            "$UPLOAD_URL")
+
+          echo "Response: $RESPONSE"
+          S3_KEY=$(echo "$RESPONSE" | grep -o '"s3Key":"[^"]*' | grep -o '[^"]*$')
+          if [ -z "$S3_KEY" ]; then
+            echo "ERROR: Artifact upload to BuildPortal failed!" >&2
+            exit 1
+          fi
 
           echo "s3_key=${S3_KEY}" >> "$GITHUB_OUTPUT"
           echo "Upload complete: s3_key=${S3_KEY}"
