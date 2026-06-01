@@ -177,9 +177,8 @@ jobs:
           else
             echo "Installing Google Play API client on-the-fly..."
             npm install googleapis --no-save
-            cat << 'EOF' > get_version.js
-            const { google } = require('googleapis');
-            const fs = require('fs');
+            echo 'const { google } = require("googleapis");
+            const fs = require("fs");
             async function run() {
               const serviceAccountJson = process.env.SERVICE_ACCOUNT_JSON;
               const packageName = process.env.PACKAGE_NAME;
@@ -190,13 +189,13 @@ jobs:
                   credentials.client_email,
                   null,
                   credentials.private_key,
-                  ['https://www.googleapis.com/auth/androidpublisher']
+                  ["https://www.googleapis.com/auth/androidpublisher"]
                 );
                 await auth.authorize();
-                const androidpublisher = google.androidpublisher({ version: 'v3', auth });
+                const androidpublisher = google.androidpublisher({ version: "v3", auth });
                 const edit = await androidpublisher.edits.insert({ packageName });
                 const editId = edit.data.id;
-                const tracksList = ['internal', 'alpha', 'beta', 'production'];
+                const tracksList = ["internal", "alpha", "beta", "production"];
                 let maxVersionCode = 0;
                 for (const trackName of tracksList) {
                   try {
@@ -214,17 +213,16 @@ jobs:
                   } catch (tErr) {}
                 }
                 try { await androidpublisher.edits.delete({ packageName, editId }); } catch (e) {}
-                console.log(`Max version code on Google Play Console: ${maxVersionCode}`);
+                console.log("Max version code on Google Play Console: " + maxVersionCode);
                 const resolvedVersionCode = Math.max(dispatchedVersionCode, maxVersionCode + 1);
-                console.log(`Resolved version code: ${resolvedVersionCode}`);
-                fs.appendFileSync(process.env.GITHUB_OUTPUT, `resolved_version_code=${resolvedVersionCode}\n`);
+                console.log("Resolved version code: " + resolvedVersionCode);
+                fs.appendFileSync(process.env.GITHUB_OUTPUT, "resolved_version_code=" + resolvedVersionCode + "\n");
               } catch (err) {
-                console.error('Error fetching version code from Play Console:', err.message);
-                fs.appendFileSync(process.env.GITHUB_OUTPUT, `resolved_version_code=${dispatchedVersionCode}\n`);
+                console.error("Error fetching version code from Play Console:", err.message);
+                fs.appendFileSync(process.env.GITHUB_OUTPUT, "resolved_version_code=" + dispatchedVersionCode + "\n");
               }
             }
-            run();
-            EOF
+            run();' > get_version.js
             node get_version.js
           fi
         env:
