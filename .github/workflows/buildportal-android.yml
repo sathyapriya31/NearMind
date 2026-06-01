@@ -147,17 +147,110 @@ jobs:
             chmod +x gradlew
           fi
 
-      # ── 6. Set version code and version name ────────────────────────────
-      - name: Set version in build.gradle
+      # ── 6. Extract Package Name ─────────────────────────────────────────
+      - name: Extract Package Name
+        id: package_info
         run: |
           GRADLE_FILE="android/app/build.gradle"
           if [ ! -f "$GRADLE_FILE" ]; then
             GRADLE_FILE="app/build.gradle"
           fi
           if [ -f "$GRADLE_FILE" ]; then
-            sed -i "s/versionCode [0-9]*/versionCode ${{ inputs.version_code }}/" "$GRADLE_FILE"
+            PACKAGE_NAME=$(grep -o "applicationId\s*['\"][^'\"]*['\"]" "$GRADLE_FILE" | head -n 1 | sed -E "s/applicationId\s*['\"]([^'\"]*)['\"]/\1/")
+            if [ -z "$PACKAGE_NAME" ]; then
+              PACKAGE_NAME=$(grep -o "applicationId\s*=\s*['\"][^'\"]*['\"]" "$GRADLE_FILE" | head -n 1 | sed -E "s/applicationId\s*=\s*['\"]([^'\"]*)['\"]/\1/")
+            fi
+          fi
+          if [ -z "$PACKAGE_NAME" ]; then
+            PACKAGE_NAME="${{ secrets.ANDROID_PACKAGE_NAME }}"
+          fi
+          echo "package_name=$PACKAGE_NAME" >> "$GITHUB_OUTPUT"
+          echo "Detected Package Name: $PACKAGE_NAME"
+
+      # ── 7. Query Google Play Console for Highest Version Code ───────────
+      - name: Fetch Max Google Play Version Code
+        id: play_version
+        run: |
+          if [ -z "${{ secrets.BP_PLAY_SERVICE_ACCOUNT_JSON }}" ] || [ -z "${{ steps.package_info.outputs.package_name }}" ]; then
+            echo "Skipping Play Store version check: service account secret or package name not available."
+            echo "resolved_version_code=${{ inputs.version_code }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "Installing Google Play API client on-the-fly..."
+            npm install googleapis --no-save
+            cat << 'EOF' > get_version.js
+            const { google } = require('googleapis');
+            const fs = require('fs');
+            async function run() {
+              const serviceAccountJson = process.env.SERVICE_ACCOUNT_JSON;
+              const packageName = process.env.PACKAGE_NAME;
+              const dispatchedVersionCode = parseInt(process.env.DISPATCHED_VERSION_CODE, 10) || 1;
+              try {
+                const credentials = JSON.parse(serviceAccountJson);
+                const auth = new google.auth.JWT(
+                  credentials.client_email,
+                  null,
+                  credentials.private_key,
+                  ['https://www.googleapis.com/auth/androidpublisher']
+                );
+                await auth.authorize();
+                const androidpublisher = google.androidpublisher({ version: 'v3', auth });
+                const edit = await androidpublisher.edits.insert({ packageName });
+                const editId = edit.data.id;
+                const tracksList = ['internal', 'alpha', 'beta', 'production'];
+                let maxVersionCode = 0;
+                for (const trackName of tracksList) {
+                  try {
+                    const track = await androidpublisher.edits.tracks.get({ packageName, editId, track: trackName });
+                    if (track.data && track.data.releases) {
+                      for (const release of track.data.releases) {
+                        if (release.versionCodes) {
+                          for (const code of release.versionCodes) {
+                            const numCode = parseInt(code, 10);
+                            if (numCode > maxVersionCode) maxVersionCode = numCode;
+                          }
+                        }
+                      }
+                    }
+                  } catch (tErr) {}
+                }
+                try { await androidpublisher.edits.delete({ packageName, editId }); } catch (e) {}
+                console.log(`Max version code on Google Play Console: ${maxVersionCode}`);
+                const resolvedVersionCode = Math.max(dispatchedVersionCode, maxVersionCode + 1);
+                console.log(`Resolved version code: ${resolvedVersionCode}`);
+                fs.appendFileSync(process.env.GITHUB_OUTPUT, `resolved_version_code=${resolvedVersionCode}\n`);
+              } catch (err) {
+                console.error('Error fetching version code from Play Console:', err.message);
+                fs.appendFileSync(process.env.GITHUB_OUTPUT, `resolved_version_code=${dispatchedVersionCode}\n`);
+              }
+            }
+            run();
+            EOF
+            node get_version.js
+          fi
+        env:
+          SERVICE_ACCOUNT_JSON: ${{ secrets.BP_PLAY_SERVICE_ACCOUNT_JSON }}
+          PACKAGE_NAME: ${{ steps.package_info.outputs.package_name }}
+          DISPATCHED_VERSION_CODE: ${{ inputs.version_code }}
+
+      # ── 8. Set version code and version name ────────────────────────────
+      - name: Set version in build.gradle
+        run: |
+          GRADLE_FILE="android/app/build.gradle"
+          if [ ! -f "$GRADLE_FILE" ]; then
+            GRADLE_FILE="app/build.gradle"
+          fi
+          
+          RESOLVED_CODE="${{ steps.play_version.outputs.resolved_version_code }}"
+          if [ -z "$RESOLVED_CODE" ]; then
+            RESOLVED_CODE="${{ inputs.version_code }}"
+          fi
+          
+          echo "RESOLVED_CODE=$RESOLVED_CODE" >> "$GITHUB_ENV"
+          
+          if [ -f "$GRADLE_FILE" ]; then
+            sed -i "s/versionCode [0-9]*/versionCode $RESOLVED_CODE/" "$GRADLE_FILE"
             sed -i "s/versionName \"[^\"]*\"/versionName \"${{ inputs.version_name }}\"/" "$GRADLE_FILE"
-            echo "Updated versionCode=${{ inputs.version_code }} versionName=${{ inputs.version_name }} in $GRADLE_FILE"
+            echo "Updated versionCode=$RESOLVED_CODE versionName=${{ inputs.version_name }} in $GRADLE_FILE"
           fi
 
       # ── 6.5 Download Android Keystore file securely ─────────────────────
@@ -289,31 +382,6 @@ jobs:
           echo "${{ inputs.release_notes }}" > whatsnew/whatsnew-en-US
           echo "Wrote release notes to whatsnew/whatsnew-en-US: ${{ inputs.release_notes }}"
 
-      # ── 12. Extract Package Name ─────────────────────────────────────────
-      - name: Extract Package Name
-        if: ${{ success() && inputs.build_type == 'uat' && inputs.android_format == 'aab' }}
-        id: package_info
-        run: |
-          GRADLE_FILE="android/app/build.gradle"
-          if [ ! -f "$GRADLE_FILE" ]; then
-            GRADLE_FILE="app/build.gradle"
-          fi
-          if [ -f "$GRADLE_FILE" ]; then
-            PACKAGE_NAME=$(grep -o "applicationId\s*['\"][^'\"]*['\"]" "$GRADLE_FILE" | head -n 1 | sed -E "s/applicationId\s*['\"]([^'\"]*)['\"]/\1/")
-            if [ -z "$PACKAGE_NAME" ]; then
-              PACKAGE_NAME=$(grep -o "applicationId\s*=\s*['\"][^'\"]*['\"]" "$GRADLE_FILE" | head -n 1 | sed -E "s/applicationId\s*=\s*['\"]([^'\"]*)['\"]/\1/")
-            fi
-          fi
-          if [ -z "$PACKAGE_NAME" ]; then
-            PACKAGE_NAME="${{ secrets.ANDROID_PACKAGE_NAME }}"
-          fi
-          if [ -z "$PACKAGE_NAME" ]; then
-            echo "ERROR: Could not auto-detect packageName from build.gradle and ANDROID_PACKAGE_NAME secret is not set!" >&2
-            exit 1
-          fi
-          echo "package_name=$PACKAGE_NAME" >> "$GITHUB_OUTPUT"
-          echo "Detected Package Name: $PACKAGE_NAME"
-
       # ── 13. Upload to Google Play (Internal Testing Track) ───────────────
       - name: Upload to Google Play (Internal Testing)
         if: ${{ success() && inputs.build_type == 'uat' && inputs.android_format == 'aab' }}
@@ -331,13 +399,15 @@ jobs:
         run: |
           curl -s -X POST "${{ inputs.callback_url }}" \
             -H "Content-Type: application/json" \
+            -H "ngrok-skip-browser-warning: true" \
             -d "{
               \"secret\": \"${{ inputs.callback_secret }}\",
               \"buildId\": \"${{ inputs.build_id }}\",
               \"status\": \"success\",
               \"s3Key\": \"${{ steps.upload.outputs.s3_key }}\",
               \"commitSha\": \"${{ steps.git.outputs.sha }}\",
-              \"commitMessage\": \"${{ steps.git.outputs.msg }}\"
+              \"commitMessage\": \"${{ steps.git.outputs.msg }}\",
+              \"buildNumber\": \"$RESOLVED_CODE\"
             }"
 
       # ── 15. Callback to BuildPortal — FAILURE ────────────────────────────
@@ -346,8 +416,9 @@ jobs:
         run: |
           curl -s -X POST "${{ inputs.callback_url }}" \
             -H "Content-Type: application/json" \
+            -H "ngrok-skip-browser-warning: true" \
             -d "{
-              \"secret\": \"${{ inputs.callback_secret }}\",
+              \"secret\": \"${{ secrets.callback_secret }}\",
               \"buildId\": \"${{ inputs.build_id }}\",
               \"status\": \"failed\",
               \"error\": \"GitHub Actions build failed. Check the workflow logs for details.\"
