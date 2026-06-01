@@ -190,7 +190,7 @@ jobs:
           FILE="${{ steps.locate.outputs.artifact_path }}"
           FILENAME=$(basename "$FILE")
           CALLBACK_URL="${{ inputs.callback_url }}"
-          UPLOAD_URL="${CALLBACK_URL%/github-actions/callback}/upload"
+          UPLOAD_URL="${CALLBACK_URL%/callback}/upload"
 
           echo "Uploading $FILE to $UPLOAD_URL..."
           RESPONSE=$(curl -s -S -F "file=@$FILE" \
