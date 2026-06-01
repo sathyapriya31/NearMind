@@ -77,9 +77,9 @@ android {
     buildToolsVersion rootProject.ext.buildToolsVersion
     compileSdk rootProject.ext.compileSdkVersion
 
-    namespace "com.spritle.nearmind"
+    namespace "com.nearmind"
     defaultConfig {
-        applicationId "com.spritle.nearmind"
+        applicationId "com.nearmind"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
         versionCode 1
