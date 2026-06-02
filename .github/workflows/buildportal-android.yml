@@ -9,7 +9,7 @@
 #      - BP_AWS_SECRET_ACCESS_KEY  : Your AWS S3 secret key
 #      - BP_S3_BUCKET_NAME         : Your S3 bucket name (e.g. buildportal-artifacts)
 #      - BP_AWS_REGION             : Your S3 region (e.g. ap-south-1)
-#      - BP_PLAY_SERVICE_ACCOUNT_JSON : Your Google Play Console Service Account JSON (UAT track only)
+#      - BP_PLAY_SERVICE_ACCOUNT_JSON : Your Google Play service account JSON key (for UAT uploads)
 #
 #   The callback_url and callback_secret inputs are injected automatically
 #   by BuildPortal when it dispatches the workflow — do not set them manually.
@@ -44,6 +44,11 @@ on:
         required: false
         default: 'apk'
         type: string
+      release_notes:
+        description: 'Release notes for Google Play Store upload'
+        required: false
+        default: 'Initial UAT Release'
+        type: string
       callback_url:
         description: 'BuildPortal backend callback URL'
         required: true
@@ -53,25 +58,20 @@ on:
         required: true
         type: string
       keystore_exists:
-        description: 'Whether keystore configuration exists'
+        description: 'Whether a keystore is configured'
         required: false
         default: 'false'
         type: string
-      keystore_url:
-        description: 'Secure presigned URL to download keystore JKS file'
-        required: false
-        type: string
       keystore_filename:
-        description: 'Original keystore filename'
-        required: false
-        default: 'release.keystore'
-        type: string
-      keystore_password:
-        description: 'Keystore password'
+        description: 'Keystore filename'
         required: false
         type: string
       keystore_alias:
-        description: 'Key alias'
+        description: 'Keystore alias'
+        required: false
+        type: string
+      keystore_password:
+        description: 'Keystore password'
         required: false
         type: string
       keystore_key_password:
@@ -85,6 +85,17 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      # ── 0. Register Workflow Run ID ──────────────────────────────────────
+      - name: Register Workflow Run ID
+        run: |
+          curl -s -X POST "${{ inputs.callback_url }}/run-id" \
+            -H "Content-Type: application/json" \
+            -d "{
+              \"secret\": \"${{ inputs.callback_secret }}\",
+              \"buildId\": \"${{ inputs.build_id }}\",
+              \"runId\": \"${{ github.run_id }}\"
+            }"
+
       # ── 1. Checkout ────────────────────────────────────────────────────────
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -97,11 +108,32 @@ jobs:
           distribution: 'temurin'
 
       # ── 3. Install Node.js (for React Native / Expo projects) ────────────
-      - name: Set up Node.js
-        if: hashFiles('package.json') != ''
+      - name: Set up Node.js (with npm cache)
+        if: hashFiles('package.json') != '' && hashFiles('package-lock.json') != ''
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Set up Node.js (with yarn cache)
+        if: hashFiles('package.json') != '' && hashFiles('yarn.lock') != ''
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'yarn'
+
+      - name: Set up Node.js (with pnpm cache)
+        if: hashFiles('package.json') != '' && hashFiles('pnpm-lock.yaml') != ''
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'pnpm'
+
+      - name: Set up Node.js (no cache)
+        if: hashFiles('package.json') != '' && hashFiles('package-lock.json') == '' && hashFiles('yarn.lock') == '' && hashFiles('pnpm-lock.yaml') == ''
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
 
       # ── 4. Install JavaScript dependencies ───────────────────────────────
       - name: Install JS dependencies
@@ -112,9 +144,9 @@ jobs:
           elif [ -f pnpm-lock.yaml ]; then
             npm install -g pnpm && pnpm install --frozen-lockfile
           elif [ -f package-lock.json ]; then
-            npm ci
+            npm ci || (echo "⚠️ npm ci failed, falling back to npm install..." && npm install --legacy-peer-deps --no-audit --no-fund)
           else
-            npm install
+            npm install --legacy-peer-deps --no-audit --no-fund
           fi
 
       # ── 5. Make gradlew executable ───────────────────────────────────────
@@ -126,30 +158,77 @@ jobs:
             chmod +x gradlew
           fi
 
-      # ── 6. Set version code and version name ────────────────────────────
-      - name: Set version in build.gradle
+      # ── 6. Extract Package Name ─────────────────────────────────────────
+      - name: Extract Package Name
+        id: package_info
         run: |
           GRADLE_FILE="android/app/build.gradle"
           if [ ! -f "$GRADLE_FILE" ]; then
             GRADLE_FILE="app/build.gradle"
           fi
           if [ -f "$GRADLE_FILE" ]; then
-            sed -i "s/versionCode [0-9]*/versionCode ${{ inputs.version_code }}/" "$GRADLE_FILE"
+            PACKAGE_NAME=$(grep -o "applicationId\s*['\"][^'\"]*['\"]" "$GRADLE_FILE" | head -n 1 | sed -E "s/applicationId\s*['\"]([^'\"]*)['\"]/\1/")
+            if [ -z "$PACKAGE_NAME" ]; then
+              PACKAGE_NAME=$(grep -o "applicationId\s*=\s*['\"][^'\"]*['\"]" "$GRADLE_FILE" | head -n 1 | sed -E "s/applicationId\s*=\s*['\"]([^'\"]*)['\"]/\1/")
+            fi
+          fi
+          if [ -z "$PACKAGE_NAME" ]; then
+            PACKAGE_NAME="${{ secrets.ANDROID_PACKAGE_NAME }}"
+          fi
+          echo "package_name=$PACKAGE_NAME" >> "$GITHUB_OUTPUT"
+          echo "Detected Package Name: $PACKAGE_NAME"
+
+      # ── 7. Set version code and version name ────────────────────────────
+      - name: Set version in build.gradle
+        run: |
+          GRADLE_FILE="android/app/build.gradle"
+          if [ ! -f "$GRADLE_FILE" ]; then
+            GRADLE_FILE="app/build.gradle"
+          fi
+          
+          RESOLVED_CODE="${{ inputs.version_code }}"
+          if [ -z "$RESOLVED_CODE" ]; then
+            RESOLVED_CODE="1"
+          fi
+          
+          echo "RESOLVED_CODE=$RESOLVED_CODE" >> "$GITHUB_ENV"
+          
+          if [ -f "$GRADLE_FILE" ]; then
+            sed -i "s/versionCode [0-9]*/versionCode $RESOLVED_CODE/" "$GRADLE_FILE"
             sed -i "s/versionName \"[^\"]*\"/versionName \"${{ inputs.version_name }}\"/" "$GRADLE_FILE"
-            echo "Updated versionCode=${{ inputs.version_code }} versionName=${{ inputs.version_name }} in $GRADLE_FILE"
+            echo "Updated versionCode=$RESOLVED_CODE versionName=${{ inputs.version_name }} in $GRADLE_FILE"
           fi
 
-      # ── 6.5. Download Signing Keystore ──────────────────────────────────
-      - name: Download Keystore from S3
+      # ── 6.5 Download Android Keystore file securely ─────────────────────
+      - name: Download Keystore
         if: ${{ inputs.keystore_exists == 'true' }}
         run: |
-          mkdir -p android/app
-          curl -s -L -o "android/app/${{ inputs.keystore_filename }}" "${{ inputs.keystore_url }}"
-          echo "Downloaded keystore file and saved to android/app/${{ inputs.keystore_filename }}"
+          if [ -d android/app ]; then
+            TARGET_DIR="android/app"
+          elif [ -d app ]; then
+            TARGET_DIR="app"
+          elif [ -d android ]; then
+            TARGET_DIR="android"
+          else
+            TARGET_DIR="."
+          fi
+          echo "Downloading keystore to $TARGET_DIR from backend..."
+          curl -s -o "$TARGET_DIR/${{ inputs.keystore_filename }}" "${{ inputs.callback_url }}/keystore/${{ inputs.build_id }}?secret=${{ inputs.callback_secret }}"
+          
+          if [ ! -f "$TARGET_DIR/${{ inputs.keystore_filename }}" ]; then
+            echo "ERROR: Failed to download keystore file!" >&2
+            exit 1
+          fi
+          
+          FILE_SIZE=$(wc -c < "$TARGET_DIR/${{ inputs.keystore_filename }}")
+          if [ "$FILE_SIZE" -le 0 ]; then
+            echo "ERROR: Downloaded keystore is empty!" >&2
+            exit 1
+          fi
+          echo "Keystore downloaded successfully: $TARGET_DIR/${{ inputs.keystore_filename }} ($FILE_SIZE bytes)."
 
       # ── 7. Build APK or AAB ──────────────────────────────────────────────
       - name: Build Android (${{ inputs.android_format }})
-        id: compile
         run: |
           if [ -f android/gradlew ]; then
             GRADLE="./android/gradlew"
@@ -160,7 +239,16 @@ jobs:
           fi
 
           if [ "${{ inputs.keystore_exists }}" = "true" ]; then
-            KEYSTORE_PATH="$(pwd)/android/app/${{ inputs.keystore_filename }}"
+            if [ -f "android/app/${{ inputs.keystore_filename }}" ]; then
+              KEYSTORE_PATH="$(pwd)/android/app/${{ inputs.keystore_filename }}"
+            elif [ -f "app/${{ inputs.keystore_filename }}" ]; then
+              KEYSTORE_PATH="$(pwd)/app/${{ inputs.keystore_filename }}"
+            elif [ -f "android/${{ inputs.keystore_filename }}" ]; then
+              KEYSTORE_PATH="$(pwd)/android/${{ inputs.keystore_filename }}"
+            else
+              KEYSTORE_PATH="$(pwd)/${{ inputs.keystore_filename }}"
+            fi
+            
             echo "Building signed ${{ inputs.android_format }} using injected credentials from $KEYSTORE_PATH..."
             if [ "${{ inputs.android_format }}" = "aab" ]; then
               (cd "$GRADLE_DIR" && ./gradlew bundleRelease --no-daemon \
@@ -176,7 +264,7 @@ jobs:
                 -Pandroid.injected.signing.key.password="${{ inputs.keystore_key_password }}")
             fi
           else
-            echo "Building unsigned/debug-signed ${{ inputs.android_format }}..."
+            echo "Building unsigned ${{ inputs.android_format }}..."
             if [ "${{ inputs.android_format }}" = "aab" ]; then
               (cd "$GRADLE_DIR" && ./gradlew bundleRelease --no-daemon)
             else
@@ -200,42 +288,6 @@ jobs:
           echo "artifact_path=$ARTIFACT" >> "$GITHUB_OUTPUT"
           echo "Found artifact: $ARTIFACT"
 
-      # ── 8.5. Extract package name & upload to Google Play Store (UAT & Production) ──
-      - name: Extract Android package name
-        if: ${{ inputs.build_type != 'testing' }}
-        id: pkg
-        run: |
-          GRADLE_FILE="android/app/build.gradle"
-          if [ ! -f "$GRADLE_FILE" ]; then
-            GRADLE_FILE="app/build.gradle"
-          fi
-          
-          PACKAGE_NAME=""
-          if [ -f "$GRADLE_FILE" ]; then
-            PACKAGE_NAME=$(grep -o "applicationId\s*['\"][^'\"]*['\"]" "$GRADLE_FILE" | head -n 1 | sed -E "s/applicationId\s*['\"]([^'\"]*)['\"]/\1/")
-            if [ -z "$PACKAGE_NAME" ]; then
-              PACKAGE_NAME=$(grep -o "applicationId\s*=\s*['\"][^'\"]*['\"]" "$GRADLE_FILE" | head -n 1 | sed -E "s/applicationId\s*=\s*['\"]([^'\"]*)['\"]/\1/")
-            fi
-          fi
-          
-          if [ -z "$PACKAGE_NAME" ]; then
-            echo "applicationId not found in build.gradle. Falling back to default NearMind package."
-            PACKAGE_NAME="com.spritle.nearmind"
-          fi
-          
-          echo "Parsed Package Name: $PACKAGE_NAME"
-          echo "package_name=$PACKAGE_NAME" >> "$GITHUB_OUTPUT"
-
-      - name: Upload to Google Play Store (UAT & Production Release only)
-        if: ${{ inputs.build_type != 'testing' }}
-        id: play
-        uses: r0adkll/upload-google-play@v1
-        with:
-          serviceAccountJsonPlainText: ${{ secrets.BP_PLAY_SERVICE_ACCOUNT_JSON }}
-          packageName: ${{ steps.pkg.outputs.package_name }}
-          releaseFiles: ${{ steps.locate.outputs.artifact_path }}
-          track: internal
-
       # ── 9. Upload artifact to BuildPortal ────────────────────────────────
       - name: Upload artifact to BuildPortal
         id: upload
@@ -249,7 +301,6 @@ jobs:
           RESPONSE=$(curl -s -S -F "file=@$FILE" \
             -F "secret=${{ inputs.callback_secret }}" \
             -F "buildId=${{ inputs.build_id }}" \
-            -F "platform=android" \
             "$UPLOAD_URL")
 
           echo "Response: $RESPONSE"
@@ -259,8 +310,8 @@ jobs:
             exit 1
           fi
 
-          echo "s3_key=${S3_KEY}" >> "$GITHUB_OUTPUT"
-          echo "Upload complete: s3_key=${S3_KEY}"
+          echo "s3_key=$S3_KEY" >> "$GITHUB_OUTPUT"
+          echo "Upload complete: s3_key=$S3_KEY"
 
       # ── 10. Get commit info ───────────────────────────────────────────────
       - name: Get commit info
@@ -269,45 +320,60 @@ jobs:
           echo "sha=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
           echo "msg=$(git log -1 --pretty=%s)" >> "$GITHUB_OUTPUT"
 
-      # ── 11. Callback to BuildPortal — SUCCESS ────────────────────────────
+      # ── 11. Write Release Notes for Google Play ──────────────────────────
+      - name: Write Release Notes
+        if: ${{ success() && inputs.build_type == 'uat' && inputs.android_format == 'aab' }}
+        run: |
+          mkdir -p whatsnew
+          echo "${{ inputs.release_notes }}" > whatsnew/whatsnew-en-US
+          echo "Wrote release notes to whatsnew/whatsnew-en-US: ${{ inputs.release_notes }}"
+
+      # ── 13. Upload to Google Play (Internal Testing Track) ───────────────
+      - name: Upload to Google Play (Internal Testing)
+        if: ${{ success() && inputs.build_type == 'uat' && inputs.android_format == 'aab' }}
+        uses: r0adkll/upload-google-play@v1
+        with:
+          serviceAccountJsonPlainText: ${{ secrets.BP_PLAY_SERVICE_ACCOUNT_JSON }}
+          packageName: ${{ steps.package_info.outputs.package_name }}
+          releaseFiles: ${{ steps.locate.outputs.artifact_path }}
+          track: internal
+          whatsNewDirectory: whatsnew
+
+      # ── 14. Callback to BuildPortal — SUCCESS ────────────────────────────
       - name: Notify BuildPortal (success)
         if: success()
         run: |
           curl -s -X POST "${{ inputs.callback_url }}" \
             -H "Content-Type: application/json" \
+            -H "ngrok-skip-browser-warning: true" \
             -d "{
               \"secret\": \"${{ inputs.callback_secret }}\",
               \"buildId\": \"${{ inputs.build_id }}\",
               \"status\": \"success\",
               \"s3Key\": \"${{ steps.upload.outputs.s3_key }}\",
               \"commitSha\": \"${{ steps.git.outputs.sha }}\",
-              \"commitMessage\": \"${{ steps.git.outputs.msg }}\"
+              \"commitMessage\": \"${{ steps.git.outputs.msg }}\",
+              \"buildNumber\": \"$RESOLVED_CODE\"
             }"
 
-      # ── 12. Callback to BuildPortal — FAILURE ────────────────────────────
-      - name: Notify BuildPortal (failure)
-        if: failure()
+      # ── 15. Callback to BuildPortal — FAILURE or CANCEL ──────────────────
+      - name: Notify BuildPortal (failure or cancel)
+        if: cancelled() || failure()
         run: |
-          ERROR_MSG="GitHub Actions build failed. Check the workflow logs for details."
-          if [ "${{ steps.compile.outcome }}" = "failure" ]; then
-            ERROR_MSG="Gradle compilation failed. Please verify your Android gradle configuration, dependencies, and code."
-          elif [ "${{ steps.locate.outcome }}" = "failure" ]; then
-            ERROR_MSG="Locating compiled build artifact failed. The output binary could not be found."
-          elif [ "${{ steps.pkg.outcome }}" = "failure" ]; then
-            ERROR_MSG="Extracting package name from build.gradle failed. Ensure applicationId is configured correctly."
-          elif [ "${{ steps.play.outcome }}" = "failure" ]; then
-            ERROR_MSG="Google Play Store upload failed. Reason: Google Play does not accept APK format for new apps (use AAB) or service account permissions/JSON is invalid."
-          elif [ "${{ steps.upload.outcome }}" = "failure" ]; then
-            ERROR_MSG="Uploading artifact to BuildPortal failed. Verify backend S3 configurations."
+          STATUS="failed"
+          if [ "${{ job.status }}" = "cancelled" ]; then
+            STATUS="cancelled"
+            ERROR_MSG="GitHub Actions build was cancelled."
+          else
+            ERROR_MSG="GitHub Actions build failed. Check the workflow logs for details."
           fi
-
-          ESCAPED_ERROR=$(echo "$ERROR_MSG" | sed 's/"/\\"/g')
 
           curl -s -X POST "${{ inputs.callback_url }}" \
             -H "Content-Type: application/json" \
+            -H "ngrok-skip-browser-warning: true" \
             -d "{
               \"secret\": \"${{ inputs.callback_secret }}\",
               \"buildId\": \"${{ inputs.build_id }}\",
-              \"status\": \"failed\",
-              \"error\": \"$ESCAPED_ERROR\"
+              \"status\": \"$STATUS\",
+              \"error\": \"$ERROR_MSG\"
             }"
