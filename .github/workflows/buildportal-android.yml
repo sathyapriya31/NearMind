@@ -44,6 +44,11 @@ on:
         required: false
         default: 'apk'
         type: string
+      release_notes:
+        description: 'Release notes for the build'
+        required: false
+        default: 'New build triggered from BuildPortal.'
+        type: string
       callback_url:
         description: 'BuildPortal backend callback URL'
         required: true
@@ -226,6 +231,13 @@ jobs:
           echo "Parsed Package Name: $PACKAGE_NAME"
           echo "package_name=$PACKAGE_NAME" >> "$GITHUB_OUTPUT"
 
+      - name: Create dynamic release notes file
+        if: ${{ inputs.build_type != 'testing' }}
+        run: |
+          mkdir -p distribution/whatsnew
+          echo "${{ inputs.release_notes }}" > distribution/whatsnew/whatsnew-default
+          echo "Created dynamic release notes file at distribution/whatsnew/whatsnew-default"
+
       - name: Upload to Google Play Store (UAT & Production Release only)
         if: ${{ inputs.build_type != 'testing' }}
         id: play
@@ -235,6 +247,7 @@ jobs:
           packageName: ${{ steps.pkg.outputs.package_name }}
           releaseFiles: ${{ steps.locate.outputs.artifact_path }}
           track: internal
+          whatsNewDirectory: distribution/whatsnew
 
       # ── 9. Upload artifact to BuildPortal ────────────────────────────────
       - name: Upload artifact to BuildPortal
