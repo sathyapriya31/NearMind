@@ -97,13 +97,21 @@ jobs:
       # ── 1.5 Notify BuildPortal (started) ──────────────────────────────────
       - name: Notify BuildPortal (started)
         run: |
+          JOBS_RES=$(curl -s -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+            -H "Accept: application/vnd.github+json" \
+            "${{ github.api_url }}/repos/${{ github.repository }}/actions/runs/${{ github.run_id }}/jobs")
+          JOB_URL=$(echo "$JOBS_RES" | jq -r '.jobs[0].html_url // empty')
+          if [ -z "$JOB_URL" ]; then
+            JOB_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          fi
+
           curl -s -X POST "${{ inputs.callback_url }}" \
             -H "Content-Type: application/json" \
             -d "{
               \"secret\": \"${{ inputs.callback_secret }}\",
               \"buildId\": \"${{ inputs.build_id }}\",
               \"status\": \"building\",
-              \"githubRunUrl\": \"${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}\"
+              \"githubRunUrl\": \"$JOB_URL\"
             }"
 
       # ── 2. Set up Java (required by Gradle) ─────────────────────────────
