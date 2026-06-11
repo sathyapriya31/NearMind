@@ -281,7 +281,7 @@ jobs:
       - name: Upload to Firebase App Distribution
         if: ${{ inputs.build_type == 'firebase' && inputs.firebase_app_id != '' }}
         id: firebase
-        uses: w3cj/firebase-app-distribution-action@v2
+        uses: wzieba/Firebase-Distribution-Github-Action@v1
         with:
           appId: ${{ inputs.firebase_app_id }}
           token: ${{ inputs.firebase_cli_token }}
