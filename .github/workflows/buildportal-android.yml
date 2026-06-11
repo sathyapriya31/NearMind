@@ -35,7 +35,7 @@ on:
         default: '1.0.0'
         type: string
       build_type:
-        description: 'Build type: testing | uat | production'
+        description: 'Build type: testing | uat | production | firebase'
         required: false
         default: 'testing'
         type: string
@@ -81,6 +81,14 @@ on:
         type: string
       keystore_key_password:
         description: 'Key password'
+        required: false
+        type: string
+      firebase_app_id:
+        description: 'Firebase App ID'
+        required: false
+        type: string
+      firebase_cli_token:
+        description: 'Firebase CLI Token'
         required: false
         type: string
 
@@ -227,7 +235,7 @@ jobs:
 
       # ── 8.5. Extract package name & upload to Google Play Store (UAT & Production) ──
       - name: Extract Android package name
-        if: ${{ inputs.build_type != 'testing' }}
+        if: ${{ inputs.build_type == 'uat' || inputs.build_type == 'production' }}
         id: pkg
         run: |
           GRADLE_FILE="android/app/build.gradle"
@@ -252,14 +260,14 @@ jobs:
           echo "package_name=$PACKAGE_NAME" >> "$GITHUB_OUTPUT"
 
       - name: Create dynamic release notes file
-        if: ${{ inputs.build_type != 'testing' }}
+        if: ${{ inputs.build_type == 'uat' || inputs.build_type == 'production' }}
         run: |
           mkdir -p distribution/whatsnew
           echo "${{ inputs.release_notes }}" > distribution/whatsnew/whatsnew-en-US
           echo "Created dynamic release notes file at distribution/whatsnew/whatsnew-en-US"
 
       - name: Upload to Google Play Store (UAT & Production Release only)
-        if: ${{ inputs.build_type != 'testing' }}
+        if: ${{ inputs.build_type == 'uat' || inputs.build_type == 'production' }}
         id: play
         uses: r0adkll/upload-google-play@v1
         with:
@@ -268,6 +276,17 @@ jobs:
           releaseFiles: ${{ steps.locate.outputs.artifact_path }}
           track: internal
           whatsNewDirectory: distribution/whatsnew
+
+      # ── 8.7. Upload to Firebase App Distribution ───────────────────────
+      - name: Upload to Firebase App Distribution
+        if: ${{ inputs.build_type == 'firebase' && inputs.firebase_app_id != '' }}
+        id: firebase
+        uses: w3cj/firebase-app-distribution-action@v2
+        with:
+          appId: ${{ inputs.firebase_app_id }}
+          token: ${{ inputs.firebase_cli_token }}
+          file: ${{ steps.locate.outputs.artifact_path }}
+          releaseNotes: ${{ inputs.release_notes }}
 
       # ── 9. Upload artifact to BuildPortal ────────────────────────────────
       - name: Upload artifact to BuildPortal
@@ -331,6 +350,8 @@ jobs:
             ERROR_MSG="Extracting package name from build.gradle failed. Ensure applicationId is configured correctly."
           elif [ "${{ steps.play.outcome }}" = "failure" ]; then
             ERROR_MSG="Google Play Store upload failed. Reason: Google Play does not accept APK format for new apps (use AAB) or service account permissions/JSON is invalid."
+          elif [ "${{ steps.firebase.outcome }}" = "failure" ]; then
+            ERROR_MSG="Firebase App Distribution upload failed. Please verify your Firebase App ID and CLI Token."
           elif [ "${{ steps.upload.outcome }}" = "failure" ]; then
             ERROR_MSG="Uploading artifact to BuildPortal failed. Verify backend S3 configurations."
           fi
